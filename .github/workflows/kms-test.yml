@@ -1,0 +1,39 @@
+name: KMS Tests
+
+on:
+  pull_request:
+    branches: [ master ]
+
+permissions:
+  contents: read
+
+env:
+  GOPRIVATE: github.com/Layr-Labs/*
+
+jobs:
+  test:
+    runs-on: ubuntu-latest #rxp-linux-2xl
+    
+    steps:
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+    - name: Configure Git for private repositories
+      run: |
+        git config --global url."https://${{ secrets.GH_TOKEN }}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+
+    - name: Set up Go
+      uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+      with:
+        go-version: '1.24'
+    
+    - name: Install dependencies
+      run: go mod download
+    
+    - name: Install mockgen
+      run: go install go.uber.org/mock/mockgen@latest
+    
+    - name: Generate mocks
+      run: make generate-kms-mocks
+    
+    - name: Run KMS tests
+      run: make test-kms

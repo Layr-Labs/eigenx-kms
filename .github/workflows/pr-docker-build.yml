@@ -1,0 +1,35 @@
+name: PR Docker Build Check
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-kms:
+    runs-on: ubuntu-latest #rxp-linux-2xl
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+    - name: Configure Git for private repositories
+      run: |
+        git config --global url."https://${{ secrets.GH_TOKEN }}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+    - name: Build KMS Docker image
+      run: |
+        docker buildx build \
+          --platform linux/amd64 \
+          --cache-from type=gha \
+          --cache-to type=gha,mode=max \
+          --build-arg GH_TOKEN=${{ secrets.GH_TOKEN }} \
+          -t eigenx-kms/kms:pr-$(git rev-parse --short HEAD) \
+          -f Dockerfile \
+          .

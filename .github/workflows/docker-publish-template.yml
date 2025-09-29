@@ -1,0 +1,158 @@
+name: Docker Publish Template
+
+on:
+  workflow_call:
+    inputs:
+      dockerfile_path:
+        description: 'Path to the Dockerfile'
+        required: true
+        type: string
+      image_path:
+        description: 'Image path in registry (e.g., compute-tee/coordinator)'
+        required: true
+        type: string
+      build_context:
+        description: 'Build context directory'
+        required: false
+        type: string
+        default: '.'
+      tag_latest:
+        description: 'Also tag as latest'
+        required: false
+        type: boolean
+        default: false
+      custom_tag:
+        description: 'Custom tag (optional, in addition to commit SHA)'
+        required: false
+        type: string
+      chain:
+        description: 'Blockchain chain'
+        required: false
+        type: string
+        default: 'sepolia'
+      environment:
+        description: 'Target environment'
+        required: false
+        type: string
+        default: 'prod'
+    secrets:
+      GCP_SA_KEY_KMS_SEPOLIA_PROD:
+        required: false
+      GCP_SA_KEY_KMS_SEPOLIA_DEV:
+        required: false
+      GH_TOKEN:
+        required: false
+env:
+  CHAIN: ${{ inputs.chain }}
+  ENVIRONMENT: ${{ inputs.environment }}
+  IMAGE_PATH: ${{ inputs.image_path }}
+  REGISTRY_LOCATION: us-east1
+  GCP_PROJECT_ID: tee-compute-kms-${{ inputs.CHAIN }}-${{ inputs.ENVIRONMENT }}
+  REGISTRY_URL: us-east1-docker.pkg.dev
+  REPO_NAME: compute-tee-containers
+  GOPRIVATE: github.com/Layr-Labs/*
+
+jobs:
+  build-and-push:
+    runs-on: rxp-linux-2xl
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+    - name: Get short SHA
+      id: short-sha
+      run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+    - name: Set environment variables
+      run: |
+        # Validate inputs to prevent injection attacks
+        if [[ ! "${{ env.CHAIN }}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+          echo "Error: Invalid chain name format"
+          exit 1
+        fi
+        if [[ ! "${{ env.ENVIRONMENT }}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+          echo "Error: Invalid environment name format"
+          exit 1
+        fi
+        
+        # Convert chain and environment to uppercase for secret names
+        CHAIN_UPPER=$(echo "${{ env.CHAIN }}" | tr '[:lower:]' '[:upper:]')
+        ENV_UPPER=$(echo "${{ env.ENVIRONMENT }}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+        
+        echo "GCP_SA_KEY_VAR=GCP_SA_KEY_KMS_${CHAIN_UPPER}_${ENV_UPPER}" >> $GITHUB_ENV
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
+      with:
+        credentials_json: ${{ secrets[env.GCP_SA_KEY_VAR] }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@6a7c903a70c8625ed6700fa299f5ddb4ca6022e9 # v2.1.5
+      with:
+        project_id: ${{ env.GCP_PROJECT_ID }}
+
+    - name: Configure Docker for Artifact Registry
+      run: |
+        gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://${{ env.REGISTRY_URL }}
+
+    - name: Verify authentication
+      run: |
+        echo "Current authenticated account:"
+        gcloud auth list
+        echo "Current project: ${{ env.GCP_PROJECT_ID }}"
+        echo "Target environment: ${{ env.CHAIN }}-${{ env.ENVIRONMENT }}"
+
+    - name: Configure Git for private repositories
+      run: |
+        git config --global url."https://${{ secrets.GH_TOKEN }}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+    - name: Build and Push Docker image
+      run: |
+
+        docker buildx build \
+          --platform linux/amd64 \
+          --cache-from type=gha \
+          --cache-to type=gha,mode=max \
+          --push \
+          --build-arg GH_TOKEN=${{ secrets.GH_TOKEN }} \
+          -t ${{ env.REGISTRY_URL }}/${{ env.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_PATH }}:${{ steps.short-sha.outputs.sha_short }} \
+          -f ${{ inputs.dockerfile_path }} \
+          ${{ inputs.build_context }}
+
+    - name: Tag and push as latest
+      # Tag as latest if: manual trigger with tag_latest=true OR push to master/main
+      if: (github.event_name == 'workflow_dispatch' && inputs.tag_latest == true) || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'))
+      run: |
+        
+        docker buildx imagetools create \
+          -t ${{ env.REGISTRY_URL }}/${{ env.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_PATH }}:latest \
+          ${{ env.REGISTRY_URL }}/${{ env.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_PATH }}:${{ steps.short-sha.outputs.sha_short }}
+
+    - name: Tag and push with custom tag
+      if: github.event_name == 'workflow_dispatch' && inputs.custom_tag != ''
+      run: |
+        
+        docker buildx imagetools create \
+          -t ${{ env.REGISTRY_URL }}/${{ env.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_PATH }}:${{ inputs.custom_tag }} \
+          ${{ env.REGISTRY_URL }}/${{ env.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_PATH }}:${{ steps.short-sha.outputs.sha_short }}
+
+    - name: Output image details
+      run: |
+        
+        echo "Multi-platform image pushed (linux/amd64): ${{ env.REGISTRY_URL }}/${{ env.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_PATH }}:${{ steps.short-sha.outputs.sha_short }}"
+        if [[ "${{ github.event_name }}" == "push" ]] && ([[ "${{ github.ref }}" == "refs/heads/master" ]] || [[ "${{ github.ref }}" == "refs/heads/main" ]]); then
+          echo "Also tagged as: ${{ env.REGISTRY_URL }}/${{ env.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_PATH }}:latest"
+        elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && [[ "${{ inputs.tag_latest }}" == "true" ]]; then
+          echo "Also tagged as: ${{ env.REGISTRY_URL }}/${{ env.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_PATH }}:latest"
+        fi
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && [[ -n "${{ inputs.custom_tag }}" ]]; then
+          echo "Also tagged as: ${{ env.REGISTRY_URL }}/${{ env.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_PATH }}:${{ inputs.custom_tag }}"
+        fi

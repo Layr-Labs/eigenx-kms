@@ -1,0 +1,75 @@
+name: Build and Publish KMS Docker Image
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+    inputs:
+      tag_latest:
+        description: 'Also tag as latest'
+        required: true
+        type: boolean
+        default: false
+      custom_tag:
+        description: 'Custom tag (optional, in addition to commit SHA)'
+        required: false
+        type: string
+      chain:
+        description: 'Blockchain chain'
+        required: true
+        type: choice
+        options:
+          - sepolia
+        default: sepolia
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - prod
+          - dev
+        default: prod
+
+jobs:
+  # Job for push events - runs both environments
+  build-and-push-both:
+    if: github.event_name == 'push'
+    strategy:
+      matrix:
+        environment: [prod, dev]
+    uses: ./.github/workflows/docker-publish-template.yml
+    with:
+      dockerfile_path: Dockerfile
+      image_path: eigenx-kms/kms
+      build_context: '.'
+      tag_latest: ${{ matrix.environment == 'prod' }}
+      custom_tag: ''
+      chain: 'sepolia'
+      environment: ${{ matrix.environment }}
+    secrets:
+      GCP_SA_KEY_KMS_SEPOLIA_PROD: ${{ secrets.GCP_SA_KEY_KMS_SEPOLIA_PROD }}
+      GCP_SA_KEY_KMS_SEPOLIA_DEV: ${{ secrets.GCP_SA_KEY_KMS_SEPOLIA_DEV }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  # Job for workflow_dispatch - runs selected environment only
+  build-and-push-single:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/docker-publish-template.yml
+    with:
+      dockerfile_path: Dockerfile
+      image_path: eigenx-kms/kms
+      build_context: '.'
+      tag_latest: ${{ inputs.tag_latest }}
+      custom_tag: ${{ inputs.custom_tag }}
+      chain: ${{ inputs.chain }}
+      environment: ${{ inputs.environment }}
+    secrets:
+      GCP_SA_KEY_KMS_SEPOLIA_PROD: ${{ secrets.GCP_SA_KEY_KMS_SEPOLIA_PROD }}
+      GCP_SA_KEY_KMS_SEPOLIA_DEV: ${{ secrets.GCP_SA_KEY_KMS_SEPOLIA_DEV }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}

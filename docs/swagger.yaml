@@ -1,0 +1,162 @@
+basePath: /
+definitions:
+  types.AddressesResponse:
+    properties:
+      evmAddresses:
+        items:
+          $ref: '#/definitions/types.EVMAddressAndDerivationPath'
+        type: array
+      solanaAddresses:
+        items:
+          $ref: '#/definitions/types.SolanaAddressAndDerivationPath'
+        type: array
+    type: object
+  types.EVMAddressAndDerivationPath:
+    properties:
+      address:
+        example: 0x1234567890abcdef1234567890abcdef12345678
+        type: string
+      derivationPath:
+        type: string
+    type: object
+  types.EnvRequest:
+    properties:
+      encryptedJwtWithRsaKey:
+        type: string
+    type: object
+  types.EnvResponse:
+    properties:
+      encryptedCombinedEnv:
+        type: string
+    type: object
+  types.SignedResponse-types_AddressesResponse:
+    properties:
+      data:
+        $ref: '#/definitions/types.AddressesResponse'
+      signature:
+        items:
+          type: integer
+        type: array
+    type: object
+  types.SignedResponse-types_EnvResponse:
+    properties:
+      data:
+        $ref: '#/definitions/types.EnvResponse'
+      signature:
+        items:
+          type: integer
+        type: array
+    type: object
+  types.SolanaAddressAndDerivationPath:
+    properties:
+      address:
+        type: string
+      derivationPath:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: KMS service for Compute TEE
+  title: Compute TEE KMS API
+  version: "1.0"
+paths:
+  /addresses:
+    get:
+      consumes:
+      - application/json
+      description: Derive EVM addresses from app's HD wallet
+      parameters:
+      - description: Application ID
+        in: query
+        name: appID
+        required: true
+        type: string
+      - description: 'Number of addresses to derive (default: 1, max: 100)'
+        in: query
+        name: count
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/types.SignedResponse-types_AddressesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get EVM addresses
+      tags:
+      - addresses
+  /env:
+    post:
+      consumes:
+      - application/json
+      description: Retrieve encrypted environment variables and mnemonic for authenticated
+        app
+      parameters:
+      - description: Encrypted JWT + RSA public key data
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/types.EnvRequest'
+      - description: App ID override (debug mode only)
+        in: query
+        name: appID
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/types.SignedResponse-types_EnvResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get environment variables
+      tags:
+      - environment
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: Get server health status
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Health check
+      tags:
+      - health
+swagger: "2.0"
