@@ -4,7 +4,7 @@ This repository contains the source code for the eigenx kms. See [here](./kms.md
 
 ## Disclaimer
 
-**🚧 eigenx-contracts is in alpha, under active development, and has not been audited.**
+**🚧 eigenx-kms is in alpha, under active development, and has not been audited.**
 
 - Features may be added, removed, or modified
 - Interfaces will have breaking changes
