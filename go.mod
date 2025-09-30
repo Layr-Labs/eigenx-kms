@@ -4,7 +4,7 @@ go 1.24
 
 require (
 	cloud.google.com/go/kms v1.22.0
-	github.com/Layr-Labs/eigenx-contracts v0.0.0-20250918051554-e851fec340a9
+	github.com/Layr-Labs/eigenx-contracts v0.0.0-20250929214419-f0d751f5c9bc
 	github.com/cenkalti/backoff/v5 v5.0.0
 	github.com/ethereum/go-ethereum v1.16.2
 	github.com/gagliardetto/solana-go v1.13.0
