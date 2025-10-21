@@ -117,6 +117,9 @@ func runServer(c *cli.Context) error {
 	e.GET("/addresses", func(c echo.Context) error {
 		return handlers.HandleAddresses(c, cfg.Logger, kmsClient)
 	}, keyAuth)
+	e.GET("/addresses/v2", func(c echo.Context) error {
+		return handlers.HandleAddressesV2(c, cfg.Logger, kmsClient)
+	}, keyAuth)
 
 	// env endpoint with rate limiting
 	e.POST("/env", func(c echo.Context) error {

@@ -122,9 +122,16 @@ TODO: specify exact permissions
 
 ## Env Retrieval
 
-The KMS server exposes a `/env` endpoint to all Google Confidential Spaces instances. This endpoint is rate-limited per IP address to prevent abuse.
+The KMS server exposes two endpoints for environment retrieval:
 
-This endpoint now uses encrypted authentication to prevent man-in-the-middle attacks. The client must:
+- **`/env` (V1)**: Basic encrypted authentication - **will be removed soon**
+- **`/env/v2` (V2)**: Enhanced security with RSA key attestation via nonce
+
+Both endpoints are available to all Google Confidential Spaces instances and are rate-limited per IP address to prevent abuse.
+
+### V1 Endpoint (`/env`) - will be removed soon
+
+This endpoint uses encrypted authentication to prevent man-in-the-middle attacks. The client must:
 
 1. **Generate ephemeral RSA key pair** (4096-bit) for the request
 2. **Create authentication payload** in the following JSON format:
@@ -136,7 +143,31 @@ This endpoint now uses encrypted authentication to prevent man-in-the-middle att
    ```
    Where `jwt` is the JWT generated as a launch attestation for every Google CS.
 3. **Encrypt the payload** using the KMS server's `KMS_ENCRYPTION_KEY` using JSON Web Encryption.
-4. **Send POST request** to `/env` endpoint with the encrypted jwt+RSA public key into an `EnvRequest` as the request body 
+4. **Send POST request** to `/env` endpoint with the encrypted jwt+RSA public key into an `EnvRequest` as the request body
+
+### V2 Endpoint (`/env/v2`) - RSA Key Attestation
+
+The V2 endpoint adds cryptographic binding between the JWT attestation and the RSA public key to prevent key substitution attacks. The client must:
+
+1. **Generate ephemeral RSA key pair** (4096-bit) for the request
+2. **Calculate RSA key hash**: Compute the SHA-256 hash of the RSA public key PEM with the `ENV_REQUEST_RSA_KEY` header
+3. **Request attested JWT with nonce**: Request a JWT from the Google Confidential Space attestation service with the RSA key hash as the `nonce` field (specifically the `eat_nonce` claim)
+4. **Create authentication payload**:
+   ```json
+   {
+     "jwt": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",  // JWT containing the nonce
+     "rsa_public_key": "-----BEGIN PUBLIC KEY-----\n..."
+   }
+   ```
+5. **Send POST request** to `/env/v2` endpoint
+
+The KMS server will:
+- Verify the JWT attestation as usual
+- Extract the `eat_nonce` claim from the JWT
+- Calculate the expected hash of the provided RSA public key
+- Verify that the nonce matches the RSA key hash, proving the key was generated inside the TEE
+
+This prevents attackers from substituting their own RSA public key to intercept secrets, as they cannot generate a valid JWT with the correct nonce without running inside the authorized TEE. 
 
 ### JWT Verification and Condfidential Spaces Checks
 
@@ -193,7 +224,12 @@ The developer CLI provides an easy to modify the developer's build process to la
 
 ## Address Generation
 
-The KMS server also exposes a `/addresses` endpoint that allows users to view the Ethereum and Solana addresses for their applications. This enables developers to know which addresses to fund or send tokens to prior to program execution. It also enables users to know which addresses are controlled by a given application.
+The KMS server exposes two endpoints for address generation:
+
+- **`/addresses` (V1)**: Returns addresses without the app identifier - **will be removed soon**
+- **`/addresses/v2` (V2)**: Returns addresses with the app identifier included
+
+These endpoints allow users to view the Ethereum and Solana addresses for their applications. This enables developers to know which addresses to fund or send tokens to prior to program execution. It also enables users to know which addresses are controlled by a given application.
 
 ### Usage
 
@@ -201,19 +237,45 @@ The KMS server also exposes a `/addresses` endpoint that allows users to view th
 - `appID` (required): Application identifier
 - `count` (optional, default: 1): Number of addresses to generate (maximum: 100)
 
-**Response**: A `SignedResponse` containing an array of EVM addresses with their corresponding derivation paths (e.g., `m/44'/60'/0'/0/0`, `m/44'/60'/0'/0/1`, etc.) and an array of EVM with their corresponding derivation paths (e.g., `m/44'/501'/0'/0'`, `m/44'/501'/1'/0'`, etc.).
+**V1 Response** (`/addresses`): A `SignedResponse` containing:
+```json
+{
+  "evmAddresses": [
+    {
+      "address": "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
+      "derivationPath": "m/44'/60'/0'/0/0"
+    }
+  ],
+  "solanaAddresses": [
+    {
+      "address": "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk",
+      "derivationPath": "m/44'/501'/0'/0'"
+    }
+  ]
+}
+```
 
-The addresses are derived from the same mnemonic that will be provided to the application via the `/env` endpoint, ensuring consistency between pre-deployment planning and runtime execution.
+**V2 Response** (`/addresses/v2`): A `SignedResponse` containing the same data as V1 plus the `appId` field:
+```json
+{
+  "appId": "0x1111111111111111111111111111111111111111",
+  "evmAddresses": [...],
+  "solanaAddresses": [...]
+}
+```
+
+The addresses are derived from the same mnemonic that will be provided to the application via the `/env` or `/env/v2` endpoints, ensuring consistency between pre-deployment planning and runtime execution.
 
 ## Limitations of the MVP
 
 ### Security Limitations
 
 - Google Confidential Spaces uses an Google attestation instead of the raw Intel TDX quote. Eventually, migrating to CVMs instead of CS will address this. This attestation has limited returned fields; see the attestation docs [here](https://cloud.google.com/confidential-computing/confidential-space/docs/reference/token-claims).
-- Google Confidential Spaces' OS image is not reproducibly buildable, but is endorsed by Google and [open sourced](https://github.com/google/go-tpm-tools/). Eventually, this will need be replaced by a reproducibly buildable image. 
+- Google Confidential Spaces' OS image is not reproducibly buildable, but is endorsed by Google and [open sourced](https://github.com/google/go-tpm-tools/). Eventually, this will need be replaced by a reproducibly buildable image.
 - The cloud admin has access to signing/decreption with them for the MVP. Eventually, a new set of keys will be generated and moved to an external system that is hardened that will also enable encryption/decryption and key derivation. In addition, KMS upgrades will need to be authorized onchain.
 - The KMS trusts the RPC it's configured with to serve the correct release events. Eventually, this will be replaced with a light client or full node for the chain running in a TEE.
 - The workload operator (the entity deploying application infrastructure) can spin up several instances (replicas) of the same application that access the secrets and keys. This does not violate the guarantee that only the whitelisted code has access to the same secrets and keys, but several instances could lead to issues like double spends and race conditions. Eventually, the workload must transparently identify the current instance onchain for the KMS to be able to verify before serving keys.
+- **V1 attestations without nonces must remain private**: Attestation JWTs with no nonce or an empty `eat_nonce` field (used by the `/env` V1 endpoint) must remain private and should never be published or shared. If an attacker obtains a valid V1 attestation JWT, they can substitute their own RSA public key and retrieve the application's secrets from the V1 endpoint. The V2 endpoint (`/env/v2`) solves this by cryptographically binding the RSA key to the attestation via the nonce, but V1 remains vulnerable if attestations are leaked. V1 is maintained for backward compatibility, but V2 should be used for all new deployments.
 
 ### Functionality Limitations
 

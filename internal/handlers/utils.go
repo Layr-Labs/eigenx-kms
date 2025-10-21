@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -52,5 +51,5 @@ func returnSuccessWithSignature[T any](c echo.Context, logger *slog.Logger, kmsC
 func returnError(c echo.Context, logger *slog.Logger, status int, errString string) error {
 	logger.Error(errString)
 	c.JSON(status, map[string]string{"error": errString})
-	return errors.New(errString)
+	return nil
 }

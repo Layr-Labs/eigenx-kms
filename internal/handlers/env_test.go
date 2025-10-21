@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -244,6 +243,14 @@ func (ts *envTestSetup) verifyEnvironmentResponse(t *testing.T, rec *httptest.Re
 	require.Equal(t, testEnvMnemonic, returnedEnv["MNEMONIC"])
 }
 
+// requireErrorResponse unmarshals the response body and checks that the error message contains the expected string(s)
+func requireErrorResponse(t *testing.T, rec *httptest.ResponseRecorder, expectedError string) {
+	var response map[string]string
+	err := json.Unmarshal(rec.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Contains(t, response["error"], expectedError)
+}
+
 func TestHandleEnv_InputValidation(t *testing.T) {
 	logger := setupEnvLogger()
 
@@ -252,14 +259,10 @@ func TestHandleEnv_InputValidation(t *testing.T) {
 
 		err := HandleEnv(c, logger, nil, nil, nil, false)
 
-		require.Error(t, err)
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, err.Error(), "Failed to parse env request")
-
-		var response map[string]string
-		err = json.Unmarshal(rec.Body.Bytes(), &response)
 		require.NoError(t, err)
-		require.Contains(t, response["error"], "Failed to parse env request")
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+
+		requireErrorResponse(t, rec, "Failed to parse env request")
 	})
 
 	t.Run("invalid JSON in request body v2", func(t *testing.T) {
@@ -267,14 +270,10 @@ func TestHandleEnv_InputValidation(t *testing.T) {
 
 		err := HandleEnvV2(c, logger, nil, nil, nil, false)
 
-		require.Error(t, err)
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, err.Error(), "Failed to parse env request")
-
-		var response map[string]string
-		err = json.Unmarshal(rec.Body.Bytes(), &response)
 		require.NoError(t, err)
-		require.Contains(t, response["error"], "Failed to parse env request")
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+
+		requireErrorResponse(t, rec, "Failed to parse env request")
 	})
 
 	t.Run("empty encryptedJwtWithRsaKey field", func(t *testing.T) {
@@ -284,14 +283,10 @@ func TestHandleEnv_InputValidation(t *testing.T) {
 
 		err := HandleEnv(c, logger, nil, nil, nil, false)
 
-		require.Error(t, err)
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, err.Error(), "Failed to decrypt encrypted request body")
-
-		var response map[string]string
-		err = json.Unmarshal(rec.Body.Bytes(), &response)
 		require.NoError(t, err)
-		require.Contains(t, response["error"], "Failed to decrypt encrypted request body")
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+
+		requireErrorResponse(t, rec, "Failed to decrypt encrypted request body")
 	})
 
 	t.Run("invalid encrypted data format", func(t *testing.T) {
@@ -301,14 +296,10 @@ func TestHandleEnv_InputValidation(t *testing.T) {
 
 		err := HandleEnv(c, logger, nil, nil, nil, false)
 
-		require.Error(t, err)
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, err.Error(), "Failed to decrypt encrypted request body")
-
-		var response map[string]string
-		err = json.Unmarshal(rec.Body.Bytes(), &response)
 		require.NoError(t, err)
-		require.Contains(t, response["error"], "Failed to decrypt encrypted request body")
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+
+		requireErrorResponse(t, rec, "Failed to decrypt encrypted request body")
 	})
 }
 
@@ -385,9 +376,10 @@ func TestHandleEnv_KMSErrorScenarios(t *testing.T) {
 
 		err := HandleEnv(c, logger, mockAttestation, mockChainClient, mockKMS, false)
 
-		require.Error(t, err)
+		require.NoError(t, err)
 		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, err.Error(), "Failed to decrypt encrypted request body")
+
+		requireErrorResponse(t, rec, "Failed to decrypt encrypted request body")
 	})
 
 }
@@ -410,9 +402,10 @@ func TestHandleEnv_ValidRequestsWithFakeKMS(t *testing.T) {
 
 				err := tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-				require.Error(t, err)
+				require.NoError(t, err)
 				require.Equal(t, http.StatusUnauthorized, rec.Code)
-				require.Contains(t, err.Error(), "Attestation verification failed")
+
+				requireErrorResponse(t, rec, "Attestation verification failed")
 			})
 
 			t.Run("Valid request with attestation success but authorization failure", func(t *testing.T) {
@@ -443,9 +436,10 @@ func TestHandleEnv_ValidRequestsWithFakeKMS(t *testing.T) {
 
 				err = tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-				require.Error(t, err)
+				require.NoError(t, err)
 				require.Equal(t, http.StatusUnauthorized, rec.Code)
-				require.Contains(t, err.Error(), "Authorization failed")
+
+				requireErrorResponse(t, rec, "Authorization failed")
 			})
 
 			t.Run("Valid request with full success path", func(t *testing.T) {
@@ -498,10 +492,9 @@ func TestHandleEnv_V1_InvalidRSAKeySize(t *testing.T) {
 	// No mocks needed since validation happens before attestation/chainclient calls
 	err = HandleEnv(c, logger, nil, nil, fakeKMS, false)
 
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Contains(t, err.Error(), "encryption key size mismatch")
-	require.Contains(t, err.Error(), "RSA key must be 4096 bits, got 2048 bits")
+	requireErrorResponse(t, rec, "encryption key size mismatch")
 }
 
 func TestHandleEnvV2_InvalidRSAKeySize(t *testing.T) {
@@ -529,10 +522,9 @@ func TestHandleEnvV2_InvalidRSAKeySize(t *testing.T) {
 
 	err = HandleEnvV2(c, logger, nil, nil, nil, false)
 
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Contains(t, err.Error(), "encryption key size mismatch")
-	require.Contains(t, err.Error(), "RSA key must be 4096 bits, got 2048 bits")
+	requireErrorResponse(t, rec, "encryption key size mismatch")
 }
 
 func TestHandleEnv_AppIDMismatchCheck(t *testing.T) {
@@ -583,10 +575,10 @@ func TestHandleEnv_AppIDMismatchCheck(t *testing.T) {
 
 				err = tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-				require.Error(t, err)
+				require.NoError(t, err)
 				require.Equal(t, http.StatusUnauthorized, rec.Code)
-				require.Contains(t, err.Error(), "Encrypted env app id mismatch")
-				require.Contains(t, err.Error(), fmt.Sprintf("expected %s, got %s", attestationAppID, encryptedEnvAppID))
+
+				requireErrorResponse(t, rec, "Encrypted env app id mismatch")
 			})
 
 			t.Run("Missing app ID header in encrypted env", func(t *testing.T) {
@@ -630,9 +622,10 @@ func TestHandleEnv_AppIDMismatchCheck(t *testing.T) {
 
 				err = tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-				require.Error(t, err)
+				require.NoError(t, err)
 				require.Equal(t, http.StatusInternalServerError, rec.Code)
-				require.Contains(t, err.Error(), "Failed to get app id from encrypted env")
+
+				requireErrorResponse(t, rec, "Failed to get app id from encrypted env")
 			})
 
 			t.Run("Tampered JWE protected header fails authentication", func(t *testing.T) {
@@ -705,13 +698,12 @@ func TestHandleEnv_AppIDMismatchCheck(t *testing.T) {
 
 				err = tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-				require.Error(t, err)
+				require.NoError(t, err)
 				require.Equal(t, http.StatusInternalServerError, rec.Code)
 
 				// The tampered JWE should fail decryption due to AEAD authentication tag verification
 				// The protected header is part of the Additional Authenticated Data (AAD)
-				require.Contains(t, err.Error(), "Failed to decrypt encrypted env",
-					"Expected decryption failure due to tampered protected header")
+				requireErrorResponse(t, rec, "Failed to decrypt encrypted env")
 			})
 
 			t.Run("Case insensitive AppID comparison", func(t *testing.T) {
@@ -824,9 +816,10 @@ func TestHandleEnv_DebugModeAppIDOverride(t *testing.T) {
 				// Disable debug mode
 				err := tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-				require.Error(t, err)
+				require.NoError(t, err)
 				require.Equal(t, http.StatusBadRequest, rec.Code)
-				require.Contains(t, err.Error(), "appID query parameter is only allowed in debug mode")
+
+				requireErrorResponse(t, rec, "appID query parameter is only allowed in debug mode")
 			})
 		})
 	}
@@ -855,9 +848,10 @@ func TestHandleEnv_V1_WithNonce(t *testing.T) {
 		err := HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
 		// Should fail - V1 doesn't support nonces
-		require.Error(t, err)
+		require.NoError(t, err)
 		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, err.Error(), "nonce should be empty for env v1 requests")
+
+		requireErrorResponse(t, rec, "nonce should be empty for env v1 requests")
 	})
 }
 
@@ -884,9 +878,10 @@ func TestHandleEnvV2_NonceValidation(t *testing.T) {
 		err := HandleEnvV2(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
 		// Should fail - V2 requires nonce
-		require.Error(t, err)
+		require.NoError(t, err)
 		require.Equal(t, http.StatusUnauthorized, rec.Code)
-		require.Contains(t, err.Error(), "no nonce found in attestation claims")
+
+		requireErrorResponse(t, rec, "no nonce found in attestation claims")
 	})
 
 	t.Run("V2 endpoint fails with wrong nonce", func(t *testing.T) {
@@ -909,9 +904,10 @@ func TestHandleEnvV2_NonceValidation(t *testing.T) {
 		err := HandleEnvV2(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
 		// Should fail - nonce doesn't match RSA key hash
-		require.Error(t, err)
+		require.NoError(t, err)
 		require.Equal(t, http.StatusUnauthorized, rec.Code)
-		require.Contains(t, err.Error(), "RSA key attestation mismatch")
+
+		requireErrorResponse(t, rec, "RSA key attestation mismatch")
 	})
 
 	t.Run("V2 endpoint succeeds with correct nonce", func(t *testing.T) {
