@@ -835,10 +835,10 @@ func TestHandleEnv_DebugModeAppIDOverride(t *testing.T) {
 func TestHandleEnv_V1_WithNonce(t *testing.T) {
 	logger := setupEnvLogger()
 
-	t.Run("V1 endpoint ignores nonce in attestation", func(t *testing.T) {
+	t.Run("V1 endpoint fails with nonce in attestation", func(t *testing.T) {
 		setup := setupHandleEnvTest(t)
 
-		// Mock attestation to return nonce (which V1 should ignore)
+		// Mock attestation to return nonce (which V1 should reject)
 		claims := &attestation.AttestationClaims{
 			ImageDigest: testValidDigest,
 			AppID:       testEnvAppID,
@@ -849,18 +849,15 @@ func TestHandleEnv_V1_WithNonce(t *testing.T) {
 			VerifyAttestation(gomock.Any(), gomock.Any()).
 			Return(claims, nil)
 
-		// Setup successful chain client response
-		privateEnv := types.Env{"SECRET_KEY": "secret_value"}
-		setup.setupSuccessfulChainClient(t, testEnvAppID, privateEnv)
-
 		requestBody, _ := json.Marshal(setup.EnvRequestV1)
 		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
 
 		err := HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-		// Should succeed - V1 doesn't care about nonce
-		require.NoError(t, err)
-		require.Equal(t, http.StatusOK, rec.Code)
+		// Should fail - V1 doesn't support nonces
+		require.Error(t, err)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		require.Contains(t, err.Error(), "nonce should be empty for env v1 requests")
 	})
 }
 
