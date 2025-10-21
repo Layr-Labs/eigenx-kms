@@ -71,6 +71,10 @@ func HandleEnv(c echo.Context, logger *slog.Logger, attestationVerifier attestat
 
 	logger.Debug("Attestation verified", "app_id", claims.AppID, "image_digest", claims.ImageDigest)
 
+	if claims.Nonce != "" {
+		return returnError(c, logger, http.StatusBadRequest, "nonce should be empty for env v1 requests")
+	}
+
 	// add the ability to override the appID if in debug mode
 	debugAppID := strings.ToLower(c.QueryParam("appID"))
 	if debugAppID != "" {
