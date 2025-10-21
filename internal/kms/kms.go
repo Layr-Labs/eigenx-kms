@@ -111,7 +111,7 @@ func (k *GcpKmsClient) SignMessage(ctx context.Context, message string) ([]byte,
 	k.logger.Debug("Starting message signing")
 
 	// Calculate the digest of the message.
-	digest := crypto.CalculateKMSSignableDigest([]byte(message))
+	digest := crypto.CalculateSignableDigest(crypto.KMSSignatureHeader, []byte(message))
 
 	// Optional but recommended: Compute digest's CRC32C.
 	crc32c := func(data []byte) uint32 {

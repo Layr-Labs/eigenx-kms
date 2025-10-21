@@ -10,14 +10,23 @@ type SignedResponse[T any] struct {
 	Signature []byte `json:"signature"`
 }
 
-type EnvRequest struct {
+type EnvRequestV1 struct {
 	EncryptedJWTWithRSAKey string `json:"encryptedJwtWithRsaKey"`
+}
+
+type EnvRequestV2 struct {
+	JWTWithAttestedRSAKey string `json:"jwtWithAttestedRsaKey"`
+	RSAKeyPEM             string `json:"rsaKey"`
 }
 
 type Env map[string]string
 
-type EnvResponse struct {
+type EnvResponseV1 struct {
 	EncryptedCombinedEnv string `json:"encryptedCombinedEnv"`
+}
+
+type EnvResponseV2 struct {
+	EncryptedCombinedEnv Env `json:"encryptedCombinedEnv"`
 }
 
 type EVMAddressAndDerivationPath struct {
@@ -30,7 +39,13 @@ type SolanaAddressAndDerivationPath struct {
 	DerivationPath string `json:"derivationPath"`
 }
 
-type AddressesResponse struct {
+type AddressesResponseV1 struct {
+	EVMAddresses    []EVMAddressAndDerivationPath    `json:"evmAddresses"`
+	SolanaAddresses []SolanaAddressAndDerivationPath `json:"solanaAddresses"`
+}
+
+type AddressesResponseV2 struct {
+	AppID           string                           `json:"appId"`
 	EVMAddresses    []EVMAddressAndDerivationPath    `json:"evmAddresses"`
 	SolanaAddresses []SolanaAddressAndDerivationPath `json:"solanaAddresses"`
 }

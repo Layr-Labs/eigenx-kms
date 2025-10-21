@@ -143,7 +143,7 @@ func TestHandleAddresses_InputValidation(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code)
 
-		var response types.SignedResponse[types.AddressesResponse]
+		var response types.SignedResponse[types.AddressesResponseV2]
 		err = json.Unmarshal(rec.Body.Bytes(), &response)
 		require.NoError(t, err)
 		require.Len(t, response.Data.EVMAddresses, 1)
@@ -242,9 +242,11 @@ func TestHandleAddresses_WalletIntegration(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code)
 
-		var response types.SignedResponse[types.AddressesResponse]
+		var response types.SignedResponse[types.AddressesResponseV2]
 		err = json.Unmarshal(rec.Body.Bytes(), &response)
 		require.NoError(t, err)
+
+		require.Equal(t, response.Data.AppID, testAppID)
 
 		require.Len(t, response.Data.EVMAddresses, 1)
 
@@ -272,9 +274,11 @@ func TestHandleAddresses_WalletIntegration(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code)
 
-		var response types.SignedResponse[types.AddressesResponse]
+		var response types.SignedResponse[types.AddressesResponseV2]
 		err = json.Unmarshal(rec.Body.Bytes(), &response)
 		require.NoError(t, err)
+
+		require.Equal(t, response.Data.AppID, testAppID)
 
 		require.Len(t, response.Data.EVMAddresses, 5)
 
@@ -315,7 +319,7 @@ func TestHandleAddresses_WalletIntegration(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code)
 
-		var response types.SignedResponse[types.AddressesResponse]
+		var response types.SignedResponse[types.AddressesResponseV2]
 		err = json.Unmarshal(rec.Body.Bytes(), &response)
 		require.NoError(t, err)
 
@@ -369,6 +373,11 @@ func TestHandleAddresses_AppIDCasing(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code)
+
+		var response types.SignedResponse[types.AddressesResponseV2]
+		err = json.Unmarshal(rec.Body.Bytes(), &response)
+		require.NoError(t, err)
+		require.Equal(t, response.Data.AppID, lowerCaseAppID)
 	})
 
 	t.Run("mixed case appID is lowercased", func(t *testing.T) {
@@ -390,6 +399,11 @@ func TestHandleAddresses_AppIDCasing(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code)
+
+		var response types.SignedResponse[types.AddressesResponseV2]
+		err = json.Unmarshal(rec.Body.Bytes(), &response)
+		require.NoError(t, err)
+		require.Equal(t, response.Data.AppID, lowerCaseAppID)
 	})
 
 	t.Run("already lowercase appID remains unchanged", func(t *testing.T) {
@@ -410,5 +424,10 @@ func TestHandleAddresses_AppIDCasing(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code)
+
+		var response types.SignedResponse[types.AddressesResponseV2]
+		err = json.Unmarshal(rec.Body.Bytes(), &response)
+		require.NoError(t, err)
+		require.Equal(t, response.Data.AppID, lowerCaseAppID)
 	})
 }

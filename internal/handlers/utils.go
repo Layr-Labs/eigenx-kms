@@ -15,6 +15,23 @@ import (
 
 const timeout = 10 * time.Second
 
+// httpError wraps an error with an HTTP status code
+type httpError struct {
+	statusCode int
+	message    string
+}
+
+func (e *httpError) Error() string {
+	return e.message
+}
+
+func newHTTPError(statusCode int, format string, args ...interface{}) *httpError {
+	return &httpError{
+		statusCode: statusCode,
+		message:    fmt.Sprintf(format, args...),
+	}
+}
+
 func returnSuccessWithSignature[T any](c echo.Context, logger *slog.Logger, kmsClient kms.KMSClient, status int, data T) error {
 	responseJSON, err := json.Marshal(data)
 	if err != nil {

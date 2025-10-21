@@ -106,7 +106,7 @@ func (f *FakeKMS) DeriveMnemonic(ctx context.Context, appID string) (string, err
 // SignMessage returns a real ECDSA signature for testing
 func (f *FakeKMS) SignMessage(ctx context.Context, message string) ([]byte, error) {
 	// Calculate the digest of the message using the same method as the real KMS
-	digest := crypto.CalculateKMSSignableDigest([]byte(message))
+	digest := crypto.CalculateSignableDigest(crypto.KMSSignatureHeader, []byte(message))
 
 	// Sign the digest using ECDSA
 	r, s, err := ecdsa.Sign(rand.Reader, f.ecdsaPrivateKey, digest)
@@ -146,19 +146,19 @@ func (f *FakeKMS) Close() error {
 	return nil
 }
 
-// CreateValidEncryptedRequest creates a valid encrypted request using the fake KMS
+// CreateValidEncryptedRequestV1 creates a valid encrypted request using the fake KMS
 // that can be used in tests to simulate real client requests
-func (f *FakeKMS) CreateValidEncryptedRequest(jwt string) (types.EnvRequest, []byte, error) {
+func (f *FakeKMS) CreateValidEncryptedRequestV1(jwt string) (types.EnvRequestV1, []byte, error) {
 	// Get our public key PEM for the request
 	kmsPublicKeyPEM, err := f.GetEncryptionPublicKeyPEM()
 	if err != nil {
-		return types.EnvRequest{}, nil, fmt.Errorf("failed to get KMS public key: %w", err)
+		return types.EnvRequestV1{}, nil, fmt.Errorf("failed to get KMS public key: %w", err)
 	}
 
 	// Generate client RSA key pair
 	clientRSAPrivatePEM, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
 	if err != nil {
-		return types.EnvRequest{}, nil, fmt.Errorf("failed to generate client RSA key pair: %w", err)
+		return types.EnvRequestV1{}, nil, fmt.Errorf("failed to generate client RSA key pair: %w", err)
 	}
 
 	// Create JWTWithRSAKey structure
@@ -169,38 +169,38 @@ func (f *FakeKMS) CreateValidEncryptedRequest(jwt string) (types.EnvRequest, []b
 
 	jwtWithKeyJSON, err := json.Marshal(jwtWithKey)
 	if err != nil {
-		return types.EnvRequest{}, nil, fmt.Errorf("failed to marshal JWT with key: %w", err)
+		return types.EnvRequestV1{}, nil, fmt.Errorf("failed to marshal JWT with key: %w", err)
 	}
 
 	// Encrypt using the crypto library like the client does
 	encryptedJWTWithRSAKey, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM(kmsPublicKeyPEM, jwtWithKeyJSON, nil)
 	if err != nil {
-		return types.EnvRequest{}, nil, fmt.Errorf("failed to encrypt JWT with RSA key: %w", err)
+		return types.EnvRequestV1{}, nil, fmt.Errorf("failed to encrypt JWT with RSA key: %w", err)
 	}
 
-	return types.EnvRequest{
+	return types.EnvRequestV1{
 		EncryptedJWTWithRSAKey: string(encryptedJWTWithRSAKey),
 	}, clientRSAPrivatePEM, nil
 }
 
-// CreateInvalidKeyEncryptedRequest creates an encrypted request with a non-4096-bit RSA key
-func (f *FakeKMS) CreateInvalidKeyEncryptedRequest(jwt string, keySize int) (types.EnvRequest, error) {
+// CreateInvalidKeyEncryptedRequestV1 creates an encrypted request with a non-4096-bit RSA key
+func (f *FakeKMS) CreateInvalidKeyEncryptedRequestV1(jwt string, keySize int) (types.EnvRequestV1, error) {
 	// Get our public key PEM for the request
 	kmsPublicKeyPEM, err := f.GetEncryptionPublicKeyPEM()
 	if err != nil {
-		return types.EnvRequest{}, fmt.Errorf("failed to get KMS public key: %w", err)
+		return types.EnvRequestV1{}, fmt.Errorf("failed to get KMS public key: %w", err)
 	}
 
 	// Generate client RSA key pair with specified size (not 4096)
 	clientPrivateKey, err := rsa.GenerateKey(rand.Reader, keySize)
 	if err != nil {
-		return types.EnvRequest{}, fmt.Errorf("failed to generate client RSA key: %w", err)
+		return types.EnvRequestV1{}, fmt.Errorf("failed to generate client RSA key: %w", err)
 	}
 
 	// Convert to PEM format
 	clientPublicKeyBytes, err := x509.MarshalPKIXPublicKey(&clientPrivateKey.PublicKey)
 	if err != nil {
-		return types.EnvRequest{}, fmt.Errorf("failed to marshal client public key: %w", err)
+		return types.EnvRequestV1{}, fmt.Errorf("failed to marshal client public key: %w", err)
 	}
 
 	clientRSAPublicPEM := pem.EncodeToMemory(&pem.Block{
@@ -216,16 +216,16 @@ func (f *FakeKMS) CreateInvalidKeyEncryptedRequest(jwt string, keySize int) (typ
 
 	jwtWithKeyJSON, err := json.Marshal(jwtWithKey)
 	if err != nil {
-		return types.EnvRequest{}, fmt.Errorf("failed to marshal JWT with key: %w", err)
+		return types.EnvRequestV1{}, fmt.Errorf("failed to marshal JWT with key: %w", err)
 	}
 
 	// Encrypt using the crypto library like the client does
 	encryptedJWTWithRSAKey, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM(kmsPublicKeyPEM, jwtWithKeyJSON, nil)
 	if err != nil {
-		return types.EnvRequest{}, fmt.Errorf("failed to encrypt JWT with RSA key: %w", err)
+		return types.EnvRequestV1{}, fmt.Errorf("failed to encrypt JWT with RSA key: %w", err)
 	}
 
-	return types.EnvRequest{
+	return types.EnvRequestV1{
 		EncryptedJWTWithRSAKey: string(encryptedJWTWithRSAKey),
 	}, nil
 }

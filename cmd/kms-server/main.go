@@ -123,6 +123,11 @@ func runServer(c *cli.Context) error {
 		return handlers.HandleEnv(c, cfg.Logger, attestationVerifier, chainClient, kmsClient, cfg.Debug)
 	}, middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(cfg.EnvRateLimit))))
 
+	// env v2 endpoint with rate limiting
+	e.POST("/env/v2", func(c echo.Context) error {
+		return handlers.HandleEnvV2(c, cfg.Logger, attestationVerifier, chainClient, kmsClient, cfg.Debug)
+	}, middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(cfg.EnvRateLimit))))
+
 	// Swagger endpoint
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 

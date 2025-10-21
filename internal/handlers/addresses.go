@@ -27,7 +27,7 @@ const maxAddresses = 100
 //	@Produce		json
 //	@Param			appID	query		string	true	"Application ID"
 //	@Param			count	query		int		false	"Number of addresses to derive (default: 1, max: 100)"
-//	@Success		200		{object}	types.SignedResponse[types.AddressesResponse]
+//	@Success		200		{object}	types.SignedResponse[types.AddressesResponseV2]
 //	@Failure		400		{object}	map[string]string
 //	@Failure		500		{object}	map[string]string
 //	@Router			/addresses [get]
@@ -105,7 +105,8 @@ func HandleAddresses(c echo.Context, logger *slog.Logger, kmsClient kms.KMSClien
 	logger.Debug("Derived addresses", "app_id", appID, "count", count)
 
 	// Create response
-	response := types.AddressesResponse{
+	response := types.AddressesResponseV2{
+		AppID:           appID,
 		EVMAddresses:    evmAddresses,
 		SolanaAddresses: solanaAddresses,
 	}
