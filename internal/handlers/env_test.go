@@ -123,8 +123,8 @@ var testConfigs = []testConfig{
 			return body
 		},
 		setupAttestation: func(setup *envTestSetup, claims *attestation.AttestationClaims) {
-			// V2 needs RSA key hash in nonces
-			claims.Nonces = []string{setup.getRSAKeyHash()}
+			// V2 needs RSA key hash in nonce
+			claims.Nonce = setup.getRSAKeyHash()
 		},
 	},
 }
@@ -832,17 +832,17 @@ func TestHandleEnv_DebugModeAppIDOverride(t *testing.T) {
 	}
 }
 
-func TestHandleEnv_V1_WithNonces(t *testing.T) {
+func TestHandleEnv_V1_WithNonce(t *testing.T) {
 	logger := setupEnvLogger()
 
-	t.Run("V1 endpoint ignores nonces in attestation", func(t *testing.T) {
+	t.Run("V1 endpoint ignores nonce in attestation", func(t *testing.T) {
 		setup := setupHandleEnvTest(t)
 
-		// Mock attestation to return nonces (which V1 should ignore)
+		// Mock attestation to return nonce (which V1 should ignore)
 		claims := &attestation.AttestationClaims{
 			ImageDigest: testValidDigest,
 			AppID:       testEnvAppID,
-			Nonces:      []string{"some_random_nonce", "another_nonce"},
+			Nonce:       "some_random_nonce",
 		}
 
 		setup.MockAttestation.EXPECT().
@@ -858,7 +858,7 @@ func TestHandleEnv_V1_WithNonces(t *testing.T) {
 
 		err := HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-		// Should succeed - V1 doesn't care about nonces
+		// Should succeed - V1 doesn't care about nonce
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code)
 	})
@@ -867,14 +867,14 @@ func TestHandleEnv_V1_WithNonces(t *testing.T) {
 func TestHandleEnvV2_NonceValidation(t *testing.T) {
 	logger := setupEnvLogger()
 
-	t.Run("V2 endpoint fails without nonces", func(t *testing.T) {
+	t.Run("V2 endpoint fails without nonce", func(t *testing.T) {
 		setup := setupHandleEnvV2Test(t)
 
-		// Mock attestation to return NO nonces
+		// Mock attestation to return NO nonce
 		claims := &attestation.AttestationClaims{
 			ImageDigest: testValidDigest,
 			AppID:       testEnvAppID,
-			Nonces:      []string{}, // Empty nonces
+			Nonce:       "", // Empty nonce
 		}
 
 		setup.MockAttestation.EXPECT().
@@ -886,10 +886,10 @@ func TestHandleEnvV2_NonceValidation(t *testing.T) {
 
 		err := HandleEnvV2(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-		// Should fail - V2 requires nonces
+		// Should fail - V2 requires nonce
 		require.Error(t, err)
 		require.Equal(t, http.StatusUnauthorized, rec.Code)
-		require.Contains(t, err.Error(), "no nonces found in attestation claims")
+		require.Contains(t, err.Error(), "no nonce found in attestation claims")
 	})
 
 	t.Run("V2 endpoint fails with wrong nonce", func(t *testing.T) {
@@ -899,7 +899,7 @@ func TestHandleEnvV2_NonceValidation(t *testing.T) {
 		claims := &attestation.AttestationClaims{
 			ImageDigest: testValidDigest,
 			AppID:       testEnvAppID,
-			Nonces:      []string{"wrong_nonce_hash"},
+			Nonce:       "wrong_nonce_hash",
 		}
 
 		setup.MockAttestation.EXPECT().
@@ -927,7 +927,7 @@ func TestHandleEnvV2_NonceValidation(t *testing.T) {
 		claims := &attestation.AttestationClaims{
 			ImageDigest: testValidDigest,
 			AppID:       testEnvAppID,
-			Nonces:      []string{expectedHash},
+			Nonce:       expectedHash,
 		}
 
 		setup.MockAttestation.EXPECT().

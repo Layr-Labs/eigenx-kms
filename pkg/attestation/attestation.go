@@ -28,9 +28,9 @@ type AttestationVerifierInterface interface {
 }
 
 type AttestationClaims struct {
-	AppID       string   `json:"app_id"`
-	ImageDigest string   `json:"image_digest"`
-	Nonces      []string `json:"nonces"`
+	AppID       string `json:"app_id"`
+	ImageDigest string `json:"image_digest"`
+	Nonce       string `json:"nonce"`
 	jwt.Token
 }
 
@@ -40,7 +40,7 @@ type ConfidentialSpaceToken struct {
 	Audience    any      `json:"aud"`
 	Exp         int64    `json:"exp"`
 	Nbf         int64    `json:"nbf"`
-	EatNonces   []string `json:"eat_nonces,omitempty"`
+	EatNonce    string   `json:"eat_nonce,omitempty"`
 	SwName      string   `json:"swname"`
 	AttesterTCB []string `json:"attester_tcb"`
 	HwModel     string   `json:"hwmodel"`
@@ -131,19 +131,13 @@ func (av *AttestationVerifier) VerifyAttestation(ctx context.Context, tokenStrin
 		return nil, fmt.Errorf("failed to extract app ID from instance name: %w", err)
 	}
 
-	// Ensure Nonces is an empty slice instead of nil if not present
-	nonces := csToken.EatNonces
-	if nonces == nil {
-		nonces = []string{}
-	}
-
 	result := &AttestationClaims{
 		AppID:       appID,
 		ImageDigest: csToken.SubMods.Container.ImageDigest,
-		Nonces:      nonces,
+		Nonce:       csToken.EatNonce,
 	}
 
-	av.logger.Debug("Attestation claims extracted", "app_id", appID, "image_digest", csToken.SubMods.Container.ImageDigest)
+	av.logger.Debug("Attestation claims extracted", "app_id", appID, "image_digest", csToken.SubMods.Container.ImageDigest, "nonce", csToken.EatNonce)
 	return result, nil
 }
 

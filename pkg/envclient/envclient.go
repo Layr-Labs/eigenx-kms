@@ -29,7 +29,7 @@ const (
 
 // AttestationTokenProvider interface for generating attestation tokens
 type AttestationTokenProvider interface {
-	GetToken(ctx context.Context, nonces []string) (string, error)
+	GetToken(ctx context.Context, nonce string) (string, error)
 }
 
 // ConfidentialSpaceTokenProvider implements AttestationTokenProvider using GCP Confidential Space
@@ -44,17 +44,17 @@ func NewConfidentialSpaceTokenProvider(logger *slog.Logger) *ConfidentialSpaceTo
 
 // attestationTokenRequest represents the request to the attestation service
 type attestationTokenRequest struct {
-	Audience  string   `json:"audience"`
-	TokenType string   `json:"token_type"`
-	Nonces    []string `json:"nonces,omitempty"`
+	Audience  string `json:"audience"`
+	TokenType string `json:"token_type"`
+	Nonce     string `json:"nonce,omitempty"`
 }
 
-func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, nonces []string) (string, error) {
+func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, nonce string) (string, error) {
 	// Create request with hard-coded audience
 	tokenReq := attestationTokenRequest{
 		Audience:  confidentialSpaceAudience,
 		TokenType: "OIDC",
-		Nonces:    nonces,
+		Nonce:     nonce,
 	}
 
 	reqBody, err := json.Marshal(tokenReq)
@@ -71,7 +71,7 @@ func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, nonces []
 		},
 	}
 
-	p.logger.Debug("Requesting attestation token", "audience", confidentialSpaceAudience, "nonces", nonces)
+	p.logger.Debug("Requesting attestation token", "audience", confidentialSpaceAudience, "nonce", nonce)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", attestationTokenURL, bytes.NewReader(reqBody))
 	if err != nil {
@@ -95,7 +95,7 @@ func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, nonces []
 		return "", fmt.Errorf("failed to read attestation token response: %w", err)
 	}
 
-	p.logger.Info("Successfully obtained attestation token")
+	p.logger.Info("Successfully obtained attestation token", "token", string(tokenBytes))
 
 	return string(tokenBytes), nil
 }
@@ -132,7 +132,7 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 
 	// Request attestation token with RSA key hash as nonce
 	e.Logger.Info("Requesting attestation token")
-	jwt, err := e.tokenProvider.GetToken(ctx, []string{rsaKeyHashHex})
+	jwt, err := e.tokenProvider.GetToken(ctx, rsaKeyHashHex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get attestation token: %w", err)
 	}

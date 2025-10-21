@@ -486,37 +486,27 @@ func TestNonceDecoding(t *testing.T) {
 	keySet, privateKey, keyID := createTestJWKS(t)
 
 	testCases := []struct {
-		name           string
-		nonces         []string
-		expectedNonces []string
+		name          string
+		nonce         string
+		expectedNonce string
 	}{
 		{
-			name:           "single nonce",
-			nonces:         []string{"abc123"},
-			expectedNonces: []string{"abc123"},
+			name:          "with nonce",
+			nonce:         "abc123",
+			expectedNonce: "abc123",
 		},
 		{
-			name:           "multiple nonces",
-			nonces:         []string{"nonce1", "nonce2", "nonce3"},
-			expectedNonces: []string{"nonce1", "nonce2", "nonce3"},
-		},
-		{
-			name:           "no nonces",
-			nonces:         []string{},
-			expectedNonces: []string{},
-		},
-		{
-			name:           "nil nonces",
-			nonces:         nil,
-			expectedNonces: []string{},
+			name:          "empty nonce",
+			nonce:         "",
+			expectedNonce: "",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create token with nonces
+			// Create token with nonce
 			csToken := createProductionCsToken()
-			csToken.EatNonces = tc.nonces
+			csToken.EatNonce = tc.nonce
 
 			// Create and sign JWT token using helper
 			signedToken := createdSignedJWT(t, privateKey, keyID, csToken)
@@ -529,11 +519,11 @@ func TestNonceDecoding(t *testing.T) {
 				debugMode: true, // Use debug mode to skip strict validation
 			}
 
-			// Verify and extract nonces
+			// Verify and extract nonce
 			claims, err := verifier.VerifyAttestation(ctx, signedToken)
 			require.NoError(t, err)
 			require.NotNil(t, claims)
-			require.Equal(t, tc.expectedNonces, claims.Nonces)
+			require.Equal(t, tc.expectedNonce, claims.Nonce)
 		})
 	}
 }

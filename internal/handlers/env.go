@@ -143,7 +143,7 @@ func HandleEnvV2(c echo.Context, logger *slog.Logger, attestationVerifier attest
 		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Attestation verification failed: %v", err))
 	}
 
-	logger.Debug("Attestation verified", "app_id", claims.AppID, "image_digest", claims.ImageDigest, "nonces", claims.Nonces)
+	logger.Debug("Attestation verified", "app_id", claims.AppID, "image_digest", claims.ImageDigest, "nonce", claims.Nonce)
 
 	// add the ability to override the appID if in debug mode
 	debugAppID := strings.ToLower(c.QueryParam("appID"))
@@ -189,17 +189,16 @@ func HandleEnvV2(c echo.Context, logger *slog.Logger, attestationVerifier attest
 
 // verifyRSAKeyAttestation verifies that the RSA public key is attested in the JWT
 func checkRSAKeyAttestation(claims *attestation.AttestationClaims, expectedRSAKeyPEM string) error {
-	// first claim should be the sha256 of the RSA public key PEM
-	if len(claims.Nonces) == 0 {
-		return fmt.Errorf("no nonces found in attestation claims")
+	// nonce should be the sha256 of the RSA public key PEM
+	if claims.Nonce == "" {
+		return fmt.Errorf("no nonce found in attestation claims")
 	}
 
-	expectedHash := claims.Nonces[0]
-	actualHashBytes := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, []byte(expectedRSAKeyPEM))
-	actualHash := hex.EncodeToString(actualHashBytes)
+	expectedHashBytes := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, []byte(expectedRSAKeyPEM))
+	expectedHash := hex.EncodeToString(expectedHashBytes)
 
-	if expectedHash != actualHash {
-		return fmt.Errorf("RSA key attestation mismatch: expected hash %s, got %s", expectedHash, actualHash)
+	if claims.Nonce != expectedHash {
+		return fmt.Errorf("RSA key attestation mismatch: expected hash %s, got %s", expectedHash, claims.Nonce)
 	}
 
 	return nil

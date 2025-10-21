@@ -37,31 +37,31 @@ const (
 
 // mockAttestationTokenProvider is a mock implementation of AttestationTokenProvider for testing
 type mockAttestationTokenProvider struct {
-	baseToken string // Token template without nonces
+	baseToken string // Token template without nonce
 	err       error
 }
 
-func (m *mockAttestationTokenProvider) GetToken(ctx context.Context, nonces []string) (string, error) {
+func (m *mockAttestationTokenProvider) GetToken(ctx context.Context, nonce string) (string, error) {
 	if m.err != nil {
 		return "", m.err
 	}
 
-	// Parse the base token to add nonces
+	// Parse the base token to add nonce
 	var claims map[string]interface{}
 	if err := json.Unmarshal([]byte(m.baseToken), &claims); err != nil {
 		return "", fmt.Errorf("failed to parse base token: %w", err)
 	}
 
-	// Add nonces to the claims
-	claims["nonces"] = nonces
+	// Add nonce to the claims
+	claims["eat_nonce"] = nonce
 
 	// Marshal back to JSON
-	tokenWithNonces, err := json.Marshal(claims)
+	tokenWithNonce, err := json.Marshal(claims)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal token with nonces: %w", err)
+		return "", fmt.Errorf("failed to marshal token with nonce: %w", err)
 	}
 
-	return string(tokenWithNonces), nil
+	return string(tokenWithNonce), nil
 }
 
 // TestKMSServer represents a test KMS server setup
@@ -128,32 +128,28 @@ func (ts *TestKMSServer) GetKMSKeys() (encryptionKey []byte, signingKey []byte, 
 
 // SetupSuccessfulMocks configures the test server for successful responses
 func (ts *TestKMSServer) SetupSuccessfulMocks(t *testing.T, appID string, privateEnv types.Env) {
-	// Setup attestation mock to extract nonces from JWT
+	// Setup attestation mock to extract nonce from JWT
 	ts.MockAttestation.EXPECT().
 		VerifyAttestation(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, jwtString string) (*attestation.AttestationClaims, error) {
-			// Parse the JWT to extract nonces
+			// Parse the JWT to extract nonce
 			var claims map[string]interface{}
 			if err := json.Unmarshal([]byte(jwtString), &claims); err != nil {
 				return nil, fmt.Errorf("failed to parse JWT: %w", err)
 			}
 
-			// Extract nonces if present
-			var nonces []string
-			if noncesRaw, ok := claims["nonces"]; ok {
-				if noncesArray, ok := noncesRaw.([]interface{}); ok {
-					for _, n := range noncesArray {
-						if nonceStr, ok := n.(string); ok {
-							nonces = append(nonces, nonceStr)
-						}
-					}
+			// Extract nonce if present
+			var nonce string
+			if nonceRaw, ok := claims["eat_nonce"]; ok {
+				if nonceStr, ok := nonceRaw.(string); ok {
+					nonce = nonceStr
 				}
 			}
 
 			return &attestation.AttestationClaims{
 				ImageDigest: testValidDigest,
 				AppID:       appID,
-				Nonces:      nonces,
+				Nonce:       nonce,
 			}, nil
 		})
 
