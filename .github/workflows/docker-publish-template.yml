@@ -54,7 +54,7 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: rxp-linux-2xl
+    runs-on: ubuntu-2404
     permissions:
       contents: read
       id-token: write
