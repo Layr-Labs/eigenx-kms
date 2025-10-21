@@ -33,24 +33,38 @@ In our mainnet alpha, the KMS serves secrets and a bip39 mnemonic to application
 ```mermaid
 sequenceDiagram
     participant AppInstance as Application Instance
+    participant AttestService as Google CS Attestation Service
     participant KMS as KMS Server
     participant OnChainRPC as On-chain RPC
     participant GCPKMS as GCP KMS
 
     AppInstance->>AppInstance: Generate ephemeral RSA key pair
     note right of AppInstance: Client Key Generation
-    
-    AppInstance->>AppInstance: Create JWT + RSA public key JSON payload
-    AppInstance->>AppInstance: Encrypt payload with KMS public key
-    note right of AppInstance: Client Authentication Encryption
 
-    AppInstance->>KMS: HTTP POST /env with EnvRequest
+    AppInstance->>AppInstance: Calculate SHA-256 hash of RSA public key
+    note right of AppInstance: Nonce Preparation (V2)
+
+    AppInstance->>AttestService: Request JWT with nonce=RSA_key_hash
+    activate AttestService
+    AttestService-->>AppInstance: Return JWT with eat_nonce claim
+    deactivate AttestService
+    note right of AppInstance: Attested JWT contains nonce binding
+
+    AppInstance->>AppInstance: Create JWT + RSA public key JSON payload
+    note right of AppInstance: Request sent in plain text
+
+    AppInstance->>KMS: HTTP POST /env/v2 with EnvRequest
     activate AppInstance
     activate KMS
 
-    KMS->>KMS: Decrypt data to get JWT + client RSA public key
+    KMS->>KMS: Parse request to get JWT + client RSA public key
     KMS->>KMS: Verify JWT signature and claims
     note right of KMS: JWT Verification and Parsing
+
+    KMS->>KMS: Extract eat_nonce from JWT
+    KMS->>KMS: Calculate hash of provided RSA public key
+    KMS->>KMS: Verify nonce matches RSA key hash
+    note right of KMS: RSA Key Attestation (V2)
 
     KMS-->>KMS: Extract appID and image_digest from JWT
 
@@ -159,15 +173,17 @@ The V2 endpoint adds cryptographic binding between the JWT attestation and the R
      "rsa_public_key": "-----BEGIN PUBLIC KEY-----\n..."
    }
    ```
-5. **Send POST request** to `/env/v2` endpoint
+5. **Send POST request** to `/env/v2` endpoint (request is sent in plain text)
 
 The KMS server will:
+- Parse the request to get the JWT and RSA public key
 - Verify the JWT attestation as usual
 - Extract the `eat_nonce` claim from the JWT
 - Calculate the expected hash of the provided RSA public key
 - Verify that the nonce matches the RSA key hash, proving the key was generated inside the TEE
+- Encrypt the response with the client's attested RSA public key
 
-This prevents attackers from substituting their own RSA public key to intercept secrets, as they cannot generate a valid JWT with the correct nonce without running inside the authorized TEE. 
+This prevents attackers from substituting their own RSA public key to intercept secrets, as they cannot generate a valid JWT with the correct nonce without running inside the authorized TEE. The request does not need to be encrypted because the response is encrypted with the attested RSA public key, ensuring only the TEE can decrypt the secrets. 
 
 ### JWT Verification and Condfidential Spaces Checks
 
@@ -280,8 +296,8 @@ The addresses are derived from the same mnemonic that will be provided to the ap
 ### Functionality Limitations
 
 - Runtime attestations are not supported by Google Confidential spaces due to aggressive rate limits
-- Launch attestations cannot be made public before they're expired since the KMS will serve keys to any requester that prevents it a valid JWT for the given application. Eventually, this can be solved by enabling runtime attestations to attest to encryption keys during secret retrieval. In the mean time, applications prove their identity by signing with messages with keys derived from the KMS provided mnemonic which users can verify against addresses signed by the KMS via the `/addresses` endpoint.
-- Communication with the KMS is manually encrypted rather than using TLS. This may lead to incompatibility with certain request approaches.
+- Launch attestations for V1 endpoints cannot be made public before they're expired since the KMS will serve keys to any requester that presents a valid JWT for the given application. The V2 endpoint solves this by cryptographically binding the RSA public key to the attestation via nonce, allowing launch attestations to be safely published. In the mean time, applications prove their identity by signing messages with keys derived from the KMS provided mnemonic which users can verify against addresses signed by the KMS via the `/addresses/v2` endpoint.
+- V1 endpoints use manually encrypted request payloads rather than TLS. V2 endpoints send requests in plain text and rely on response encryption with the attested RSA public key. This may lead to incompatibility with certain request approaches.
 
 # KMS Roadmap
  
