@@ -115,7 +115,7 @@ func HandleEnv(c echo.Context, logger *slog.Logger, attestationVerifier attestat
 //	@Produce		json
 //	@Param			data	    body		types.EnvRequestV2	true	"JWT with attested RSA public key"
 //	@Param			appID		query		string				false	"App ID override (debug mode only)"
-//	@Success		200			{object}	types.SignedResponse[types.EnvResponseV1]
+//	@Success		200			{object}	types.SignedResponse[types.EnvResponseV2]
 //	@Failure		400			{object}	map[string]string
 //	@Failure		401			{object}	map[string]string
 //	@Failure		500			{object}	map[string]string

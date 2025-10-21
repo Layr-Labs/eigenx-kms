@@ -265,7 +265,7 @@ func TestHandleEnv_InputValidation(t *testing.T) {
 	t.Run("invalid JSON in request body v2", func(t *testing.T) {
 		c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v2", []byte("{invalid json}"))
 
-		err := HandleEnv(c, logger, nil, nil, nil, false)
+		err := HandleEnvV2(c, logger, nil, nil, nil, false)
 
 		require.Error(t, err)
 		require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -830,4 +830,121 @@ func TestHandleEnv_DebugModeAppIDOverride(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestHandleEnv_V1_WithNonces(t *testing.T) {
+	logger := setupEnvLogger()
+
+	t.Run("V1 endpoint ignores nonces in attestation", func(t *testing.T) {
+		setup := setupHandleEnvTest(t)
+
+		// Mock attestation to return nonces (which V1 should ignore)
+		claims := &attestation.AttestationClaims{
+			ImageDigest: testValidDigest,
+			AppID:       testEnvAppID,
+			Nonces:      []string{"some_random_nonce", "another_nonce"},
+		}
+
+		setup.MockAttestation.EXPECT().
+			VerifyAttestation(gomock.Any(), gomock.Any()).
+			Return(claims, nil)
+
+		// Setup successful chain client response
+		privateEnv := types.Env{"SECRET_KEY": "secret_value"}
+		setup.setupSuccessfulChainClient(t, testEnvAppID, privateEnv)
+
+		requestBody, _ := json.Marshal(setup.EnvRequestV1)
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
+
+		err := HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+		// Should succeed - V1 doesn't care about nonces
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code)
+	})
+}
+
+func TestHandleEnvV2_NonceValidation(t *testing.T) {
+	logger := setupEnvLogger()
+
+	t.Run("V2 endpoint fails without nonces", func(t *testing.T) {
+		setup := setupHandleEnvV2Test(t)
+
+		// Mock attestation to return NO nonces
+		claims := &attestation.AttestationClaims{
+			ImageDigest: testValidDigest,
+			AppID:       testEnvAppID,
+			Nonces:      []string{}, // Empty nonces
+		}
+
+		setup.MockAttestation.EXPECT().
+			VerifyAttestation(gomock.Any(), gomock.Any()).
+			Return(claims, nil)
+
+		requestBody, _ := json.Marshal(setup.EnvRequestV2)
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v2", requestBody)
+
+		err := HandleEnvV2(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+		// Should fail - V2 requires nonces
+		require.Error(t, err)
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+		require.Contains(t, err.Error(), "no nonces found in attestation claims")
+	})
+
+	t.Run("V2 endpoint fails with wrong nonce", func(t *testing.T) {
+		setup := setupHandleEnvV2Test(t)
+
+		// Mock attestation to return WRONG nonce
+		claims := &attestation.AttestationClaims{
+			ImageDigest: testValidDigest,
+			AppID:       testEnvAppID,
+			Nonces:      []string{"wrong_nonce_hash"},
+		}
+
+		setup.MockAttestation.EXPECT().
+			VerifyAttestation(gomock.Any(), gomock.Any()).
+			Return(claims, nil)
+
+		requestBody, _ := json.Marshal(setup.EnvRequestV2)
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v2", requestBody)
+
+		err := HandleEnvV2(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+		// Should fail - nonce doesn't match RSA key hash
+		require.Error(t, err)
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+		require.Contains(t, err.Error(), "RSA key attestation mismatch")
+	})
+
+	t.Run("V2 endpoint succeeds with correct nonce", func(t *testing.T) {
+		setup := setupHandleEnvV2Test(t)
+
+		// Calculate the correct RSA key hash
+		expectedHash := setup.getRSAKeyHash()
+
+		// Mock attestation to return correct nonce
+		claims := &attestation.AttestationClaims{
+			ImageDigest: testValidDigest,
+			AppID:       testEnvAppID,
+			Nonces:      []string{expectedHash},
+		}
+
+		setup.MockAttestation.EXPECT().
+			VerifyAttestation(gomock.Any(), gomock.Any()).
+			Return(claims, nil)
+
+		// Setup successful chain client response
+		privateEnv := types.Env{"SECRET_KEY": "secret_value"}
+		setup.setupSuccessfulChainClient(t, testEnvAppID, privateEnv)
+
+		requestBody, _ := json.Marshal(setup.EnvRequestV2)
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v2", requestBody)
+
+		err := HandleEnvV2(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+		// Should succeed - nonce matches RSA key hash
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code)
+	})
 }

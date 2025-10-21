@@ -25,9 +25,7 @@ type EnvResponseV1 struct {
 	EncryptedCombinedEnv string `json:"encryptedCombinedEnv"`
 }
 
-type EnvResponseV2 struct {
-	EncryptedCombinedEnv Env `json:"encryptedCombinedEnv"`
-}
+type EnvResponseV2 = EnvResponseV1
 
 type EVMAddressAndDerivationPath struct {
 	Address        common.Address `json:"address" swaggertype:"string" example:"0x1234567890abcdef1234567890abcdef12345678"`

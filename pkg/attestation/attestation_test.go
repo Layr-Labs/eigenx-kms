@@ -477,3 +477,63 @@ func TestInstanceNameParsing(t *testing.T) {
 		})
 	}
 }
+
+func TestNonceDecoding(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	// Setup JWKS once for all test cases
+	keySet, privateKey, keyID := createTestJWKS(t)
+
+	testCases := []struct {
+		name           string
+		nonces         []string
+		expectedNonces []string
+	}{
+		{
+			name:           "single nonce",
+			nonces:         []string{"abc123"},
+			expectedNonces: []string{"abc123"},
+		},
+		{
+			name:           "multiple nonces",
+			nonces:         []string{"nonce1", "nonce2", "nonce3"},
+			expectedNonces: []string{"nonce1", "nonce2", "nonce3"},
+		},
+		{
+			name:           "no nonces",
+			nonces:         []string{},
+			expectedNonces: []string{},
+		},
+		{
+			name:           "nil nonces",
+			nonces:         nil,
+			expectedNonces: []string{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create token with nonces
+			csToken := createProductionCsToken()
+			csToken.EatNonces = tc.nonces
+
+			// Create and sign JWT token using helper
+			signedToken := createdSignedJWT(t, privateKey, keyID, csToken)
+
+			// Create verifier with mock key set
+			verifier := &AttestationVerifier{
+				logger:    logger,
+				projectID: "tee-compute-sepolia-prod",
+				jwksCache: keySet,
+				debugMode: true, // Use debug mode to skip strict validation
+			}
+
+			// Verify and extract nonces
+			claims, err := verifier.VerifyAttestation(ctx, signedToken)
+			require.NoError(t, err)
+			require.NotNil(t, claims)
+			require.Equal(t, tc.expectedNonces, claims.Nonces)
+		})
+	}
+}

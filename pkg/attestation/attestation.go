@@ -131,10 +131,16 @@ func (av *AttestationVerifier) VerifyAttestation(ctx context.Context, tokenStrin
 		return nil, fmt.Errorf("failed to extract app ID from instance name: %w", err)
 	}
 
+	// Ensure Nonces is an empty slice instead of nil if not present
+	nonces := csToken.EatNonces
+	if nonces == nil {
+		nonces = []string{}
+	}
+
 	result := &AttestationClaims{
 		AppID:       appID,
 		ImageDigest: csToken.SubMods.Container.ImageDigest,
-		Nonces:      csToken.EatNonces,
+		Nonces:      nonces,
 	}
 
 	av.logger.Debug("Attestation claims extracted", "app_id", appID, "image_digest", csToken.SubMods.Container.ImageDigest)

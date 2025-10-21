@@ -33,6 +33,7 @@ type AttestationTokenProvider interface {
 }
 
 // ConfidentialSpaceTokenProvider implements AttestationTokenProvider using GCP Confidential Space
+// reference: https://cloud.google.com/confidential-computing/confidential-space/docs/connect-external-resources#retrieve_attestation_tokens
 type ConfidentialSpaceTokenProvider struct {
 	logger *slog.Logger
 }
@@ -178,7 +179,7 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 	return envJSONBytes, nil
 }
 
-func (e *EnvClient) sendRequest(ctx context.Context, envRequest types.EnvRequestV2) (*types.SignedResponse[types.EnvResponseV1], error) {
+func (e *EnvClient) sendRequest(ctx context.Context, envRequest types.EnvRequestV2) (*types.SignedResponse[types.EnvResponseV2], error) {
 	// Marshal the env request
 	requestBody, err := json.Marshal(envRequest)
 	if err != nil {
@@ -236,7 +237,7 @@ func (e *EnvClient) sendRequest(ctx context.Context, envRequest types.EnvRequest
 	//end retries
 
 	// Parse response
-	var signedResponse types.SignedResponse[types.EnvResponseV1]
+	var signedResponse types.SignedResponse[types.EnvResponseV2]
 	if err := json.Unmarshal(responseBody, &signedResponse); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
