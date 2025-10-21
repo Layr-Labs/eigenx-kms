@@ -44,9 +44,9 @@ func NewConfidentialSpaceTokenProvider(logger *slog.Logger) *ConfidentialSpaceTo
 
 // attestationTokenRequest represents the request to the attestation service
 type attestationTokenRequest struct {
-	Audience  string `json:"audience"`
-	TokenType string `json:"token_type"`
-	Nonce     string `json:"nonce,omitempty"`
+	Audience  string   `json:"audience"`
+	TokenType string   `json:"token_type"`
+	Nonces    []string `json:"nonces"`
 }
 
 func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, nonce string) (string, error) {
@@ -54,7 +54,7 @@ func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, nonce str
 	tokenReq := attestationTokenRequest{
 		Audience:  confidentialSpaceAudience,
 		TokenType: "OIDC",
-		Nonce:     nonce,
+		Nonces:    []string{nonce},
 	}
 
 	reqBody, err := json.Marshal(tokenReq)
