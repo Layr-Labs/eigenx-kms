@@ -4,6 +4,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+// JWTAudience is the audience claim used in attestation JWTs
+const JWTAudience = "EigenX KMS"
+
 // generic type for signed responses
 type SignedResponse[T any] struct {
 	Data      T      `json:"data"`

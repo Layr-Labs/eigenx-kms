@@ -273,6 +273,28 @@ func TestVerifyAttestation(t *testing.T) {
 		require.Contains(t, err.Error(), "claim \"iss\" does not have the expected value")
 	})
 
+	t.Run("valid Google STS audience", func(t *testing.T) {
+		csToken := createProductionCsToken()
+		csToken.Audience = "https://sts.googleapis.com"
+		token := createdSignedJWT(t, privateKey, keyID, csToken)
+
+		claims, err := verifier.VerifyAttestation(ctx, token)
+		require.NoError(t, err)
+		require.NotNil(t, claims)
+		require.Equal(t, "0xb69a8c848a4b79f4c1810c31156d80e7eaff874a", claims.AppID)
+	})
+
+	t.Run("valid EigenX KMS audience", func(t *testing.T) {
+		csToken := createProductionCsToken()
+		csToken.Audience = "EigenX KMS"
+		token := createdSignedJWT(t, privateKey, keyID, csToken)
+
+		claims, err := verifier.VerifyAttestation(ctx, token)
+		require.NoError(t, err)
+		require.NotNil(t, claims)
+		require.Equal(t, "0xb69a8c848a4b79f4c1810c31156d80e7eaff874a", claims.AppID)
+	})
+
 	t.Run("invalid audience", func(t *testing.T) {
 		csToken := createProductionCsToken()
 		csToken.Audience = "https://malicious.com"
@@ -280,7 +302,7 @@ func TestVerifyAttestation(t *testing.T) {
 
 		_, err := verifier.VerifyAttestation(ctx, token)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "\"aud\" not satisfied")
+		require.Contains(t, err.Error(), "invalid audience")
 	})
 
 	t.Run("invalid exp", func(t *testing.T) {

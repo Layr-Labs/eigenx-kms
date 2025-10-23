@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Layr-Labs/eigenx-kms/pkg/types"
 	"github.com/lestrrat-go/httprc/v3"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jwt"
@@ -105,10 +106,23 @@ func (av *AttestationVerifier) VerifyAttestation(ctx context.Context, tokenStrin
 		jwt.WithKeySet(av.jwksCache),
 		jwt.WithValidate(true),
 		jwt.WithIssuer(confidentialSpaceIssuer),
-		jwt.WithAudience(confidentialSpaceAudience),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("token parsing/verification failed: %w", err)
+	}
+
+	// Validate audience - accept either Google STS or EigenX KMS audience
+	// Extract audience directly from the token before marshaling
+	audiences, ok := token.Audience()
+	if !ok {
+		return nil, fmt.Errorf("audience claim not found in token")
+	}
+	if len(audiences) != 1 {
+		return nil, fmt.Errorf("audience must contain exactly one value, got %d", len(audiences))
+	}
+	audStr := audiences[0]
+	if audStr != confidentialSpaceAudience && audStr != types.JWTAudience {
+		return nil, fmt.Errorf("invalid audience: expected %s or %s, got %s", confidentialSpaceAudience, types.JWTAudience, audStr)
 	}
 
 	csToken := &ConfidentialSpaceToken{}

@@ -18,13 +18,12 @@ import (
 )
 
 const (
-	initialInterval           = 500 * time.Millisecond
-	maxInterval               = 5 * time.Second
-	multiplier                = 1.5
-	maxElapsedTime            = 2 * time.Minute
-	attestationSocketPath     = "/run/container_launcher/teeserver.sock"
-	attestationTokenURL       = "http://localhost/v1/token"
-	confidentialSpaceAudience = "https://sts.googleapis.com"
+	initialInterval       = 500 * time.Millisecond
+	maxInterval           = 5 * time.Second
+	multiplier            = 1.5
+	maxElapsedTime        = 2 * time.Minute
+	attestationSocketPath = "/run/container_launcher/teeserver.sock"
+	attestationTokenURL   = "http://localhost/v1/intel/token"
 )
 
 // AttestationTokenProvider interface for generating attestation tokens
@@ -32,7 +31,7 @@ type AttestationTokenProvider interface {
 	GetToken(ctx context.Context, nonce string) (string, error)
 }
 
-// ConfidentialSpaceTokenProvider implements AttestationTokenProvider using GCP Confidential Space
+// ConfidentialSpaceTokenProvider implements AttestationTokenProvider using Intel Trust Authority via GCP Confidential Space
 // reference: https://cloud.google.com/confidential-computing/confidential-space/docs/connect-external-resources#retrieve_attestation_tokens
 type ConfidentialSpaceTokenProvider struct {
 	logger *slog.Logger
@@ -50,9 +49,9 @@ type attestationTokenRequest struct {
 }
 
 func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, nonce string) (string, error) {
-	// Create request with hard-coded audience
+	// Create request with EigenX KMS audience
 	tokenReq := attestationTokenRequest{
-		Audience:  confidentialSpaceAudience,
+		Audience:  types.JWTAudience,
 		TokenType: "OIDC",
 		Nonces:    []string{nonce},
 	}
@@ -71,7 +70,7 @@ func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, nonce str
 		},
 	}
 
-	p.logger.Debug("Requesting attestation token", "audience", confidentialSpaceAudience, "nonce", nonce)
+	p.logger.Debug("Requesting attestation token", "audience", types.JWTAudience, "nonce", nonce)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", attestationTokenURL, bytes.NewReader(reqBody))
 	if err != nil {
