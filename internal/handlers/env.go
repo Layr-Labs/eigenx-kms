@@ -63,10 +63,15 @@ func HandleEnv(c echo.Context, logger *slog.Logger, attestationVerifier attestat
 		return returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("encryption key size mismatch: %v", err))
 	}
 
-	// Verify attestation and extract claims using the JWT
-	claims, err := attestationVerifier.VerifyAttestation(ctx, jwtWithKey.JWT)
+	// Verify attestation and extract claims using the JWT (V1 accepts both Google CS and Intel)
+	// Try Google first for backward compatibility, then Intel
+	claims, err := attestationVerifier.VerifyAttestation(ctx, jwtWithKey.JWT, attestation.GoogleConfidentialSpace)
 	if err != nil {
-		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Attestation verification failed: %v", err))
+		logger.Debug("Google CS attestation failed, trying Intel", "error", err)
+		claims, err = attestationVerifier.VerifyAttestation(ctx, jwtWithKey.JWT, attestation.IntelTrustAuthority)
+		if err != nil {
+			return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Attestation verification failed: %v", err))
+		}
 	}
 
 	logger.Debug("Attestation verified", "app_id", claims.AppID, "image_digest", claims.ImageDigest)
@@ -141,8 +146,8 @@ func HandleEnvV2(c echo.Context, logger *slog.Logger, attestationVerifier attest
 		return returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("encryption key size mismatch: %v", err))
 	}
 
-	// Verify attestation and extract claims using the JWT
-	claims, err := attestationVerifier.VerifyAttestation(ctx, envRequest.JWTWithAttestedRSAKey)
+	// Verify attestation and extract claims using the JWT (V2 uses Intel Trust Authority)
+	claims, err := attestationVerifier.VerifyAttestation(ctx, envRequest.JWTWithAttestedRSAKey, attestation.IntelTrustAuthority)
 	if err != nil {
 		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Attestation verification failed: %v", err))
 	}

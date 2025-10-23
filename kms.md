@@ -33,7 +33,7 @@ In our mainnet alpha, the KMS serves secrets and a bip39 mnemonic to application
 ```mermaid
 sequenceDiagram
     participant AppInstance as Application Instance
-    participant AttestService as Google CS Attestation Service
+    participant AttestService as Intel Trust Authority
     participant KMS as KMS Server
     participant OnChainRPC as On-chain RPC
     participant GCPKMS as GCP KMS
@@ -48,7 +48,7 @@ sequenceDiagram
     activate AttestService
     AttestService-->>AppInstance: Return JWT with eat_nonce claim
     deactivate AttestService
-    note right of AppInstance: Attested JWT contains nonce binding
+    note right of AppInstance: Attested JWT contains nonce binding (Intel TDX)
 
     AppInstance->>AppInstance: Create JWT + RSA public key JSON payload
     note right of AppInstance: Request sent in plain text
@@ -138,8 +138,8 @@ TODO: specify exact permissions
 
 The KMS server exposes two endpoints for environment retrieval:
 
-- **`/env` (V1)**: Basic encrypted authentication - **will be removed soon**
-- **`/env/v2` (V2)**: Enhanced security with RSA key attestation via nonce
+- **`/env` (V1)**: Basic encrypted authentication with Google CS attestations - **will be removed soon**
+- **`/env/v2` (V2)**: Enhanced security with RSA key attestation via nonce using Intel Trust Authority attestations
 
 Both endpoints are available to all Google Confidential Spaces instances and are rate-limited per IP address to prevent abuse.
 
@@ -165,7 +165,7 @@ The V2 endpoint adds cryptographic binding between the JWT attestation and the R
 
 1. **Generate ephemeral RSA key pair** (4096-bit) for the request
 2. **Calculate RSA key hash**: Compute the SHA-256 hash of the RSA public key PEM with the `ENV_REQUEST_RSA_KEY` header
-3. **Request attested JWT with nonce**: Request a JWT from the Google Confidential Space attestation service with the RSA key hash as the `nonce` field (specifically the `eat_nonce` claim)
+3. **Request attested JWT with nonce**: Request a JWT from Intel Trust Authority (via Google Confidential Space) with the RSA key hash as the `eat_nonce` field
 4. **Create authentication payload**:
    ```json
    {
@@ -185,13 +185,16 @@ The KMS server will:
 
 This prevents attackers from substituting their own RSA public key to intercept secrets, as they cannot generate a valid JWT with the correct nonce without running inside the authorized TEE. The request does not need to be encrypted because the response is encrypted with the attested RSA public key, ensuring only the TEE can decrypt the secrets. 
 
-### JWT Verification and Condfidential Spaces Checks
+### JWT Verification and Confidential Spaces Checks
 
-The `jwt` ([example](https://gist.github.com/solimander/41fe9d3e134bfa5918fd562ca4924d8e#file-payload-json-L51)) is verified to be signed by a key in the [Google CS JWKS](https://cloud.google.com/confidential-computing/confidential-space/docs/reference/token-validation-endpoint-fields) (JSON Web Key Set).
+The `jwt` ([example](https://gist.github.com/solimander/41fe9d3e134bfa5918fd562ca4924d8e#file-payload-json-L51)) is verified to be signed by a key in the appropriate JWKS (JSON Web Key Set):
 
-The token is then verified to be attested to be 
+- **V1 endpoint**: Uses [Google CS JWKS](https://cloud.google.com/confidential-computing/confidential-space/docs/reference/token-validation-endpoint-fields)
+- **V2 endpoint**: Uses [Intel Trust Authority JWKS](https://portal.trustauthority.intel.com/certs)
 
-1. running in an Intel based Google Confidential Space
+The token is then verified to be attested to be
+
+1. running in an Intel TDX based Google Confidential Space
 2. with a STABLE production OS image
 
 The `appID` (the address of the app contract for the application) is parsed from the name of the requesting instance.

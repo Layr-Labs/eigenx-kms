@@ -95,6 +95,7 @@ type testConfig struct {
 	setupFunc        func(t *testing.T) *envTestSetup
 	getRequestBody   func(setup *envTestSetup) []byte
 	setupAttestation func(setup *envTestSetup, claims *attestation.AttestationClaims)
+	provider         attestation.AttestationProvider // Provider to use for attestation verification
 }
 
 // testConfigs defines both V1 and V2 configurations
@@ -104,6 +105,7 @@ var testConfigs = []testConfig{
 		endpoint:  "/env",
 		handler:   HandleEnv,
 		setupFunc: setupHandleEnvTest,
+		provider:  attestation.GoogleConfidentialSpace,
 		getRequestBody: func(setup *envTestSetup) []byte {
 			body, _ := json.Marshal(setup.EnvRequestV1)
 			return body
@@ -117,6 +119,7 @@ var testConfigs = []testConfig{
 		endpoint:  "/env/v2",
 		handler:   HandleEnvV2,
 		setupFunc: setupHandleEnvV2Test,
+		provider:  attestation.IntelTrustAuthority,
 		getRequestBody: func(setup *envTestSetup) []byte {
 			body, _ := json.Marshal(setup.EnvRequestV2)
 			return body
@@ -393,9 +396,22 @@ func TestHandleEnv_ValidRequestsWithFakeKMS(t *testing.T) {
 				setup := tc.setupFunc(t)
 
 				// Mock attestation to fail
-				setup.MockAttestation.EXPECT().
-					VerifyAttestation(gomock.Any(), gomock.Any()).
-					Return(nil, errors.New("attestation verification failed"))
+				// V1 tries both Google and Intel, so we need to mock both
+				if tc.provider == attestation.GoogleConfidentialSpace {
+					// First try Google (fails)
+					setup.MockAttestation.EXPECT().
+						VerifyAttestation(gomock.Any(), gomock.Any(), attestation.GoogleConfidentialSpace).
+						Return(nil, errors.New("attestation verification failed"))
+					// Then try Intel (also fails)
+					setup.MockAttestation.EXPECT().
+						VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
+						Return(nil, errors.New("attestation verification failed"))
+				} else {
+					// V2 only uses Intel
+					setup.MockAttestation.EXPECT().
+						VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
+						Return(nil, errors.New("attestation verification failed"))
+				}
 
 				requestBody := tc.getRequestBody(setup)
 				c, rec := setupEchoContextWithBody(http.MethodPost, tc.endpoint, requestBody)
@@ -419,7 +435,7 @@ func TestHandleEnv_ValidRequestsWithFakeKMS(t *testing.T) {
 				tc.setupAttestation(setup, claims)
 
 				setup.MockAttestation.EXPECT().
-					VerifyAttestation(gomock.Any(), gomock.Any()).
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
 					Return(claims, nil)
 
 				// Mock ChainClient to return different digest (causing authorization failure)
@@ -453,7 +469,7 @@ func TestHandleEnv_ValidRequestsWithFakeKMS(t *testing.T) {
 				tc.setupAttestation(setup, claims)
 
 				setup.MockAttestation.EXPECT().
-					VerifyAttestation(gomock.Any(), gomock.Any()).
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
 					Return(claims, nil)
 
 				// Setup successful chain client response
@@ -546,7 +562,7 @@ func TestHandleEnv_AppIDMismatchCheck(t *testing.T) {
 				tc.setupAttestation(setup, claims)
 
 				setup.MockAttestation.EXPECT().
-					VerifyAttestation(gomock.Any(), gomock.Any()).
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
 					Return(claims, nil)
 
 				// Create encrypted env data with different app ID in headers
@@ -594,7 +610,7 @@ func TestHandleEnv_AppIDMismatchCheck(t *testing.T) {
 				tc.setupAttestation(setup, claims)
 
 				setup.MockAttestation.EXPECT().
-					VerifyAttestation(gomock.Any(), gomock.Any()).
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
 					Return(claims, nil)
 
 				// Create encrypted env data WITHOUT app ID headers
@@ -644,7 +660,7 @@ func TestHandleEnv_AppIDMismatchCheck(t *testing.T) {
 				tc.setupAttestation(setup, claims)
 
 				setup.MockAttestation.EXPECT().
-					VerifyAttestation(gomock.Any(), gomock.Any()).
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
 					Return(claims, nil)
 
 				// Create victim's encrypted env data with victim's app ID in header
@@ -721,7 +737,7 @@ func TestHandleEnv_AppIDMismatchCheck(t *testing.T) {
 				tc.setupAttestation(setup, claims)
 
 				setup.MockAttestation.EXPECT().
-					VerifyAttestation(gomock.Any(), gomock.Any()).
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
 					Return(claims, nil)
 
 				// Create encrypted env with lowercase
@@ -776,7 +792,7 @@ func TestHandleEnv_DebugModeAppIDOverride(t *testing.T) {
 				tc.setupAttestation(setup, claims)
 
 				setup.MockAttestation.EXPECT().
-					VerifyAttestation(gomock.Any(), gomock.Any()).
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
 					Return(claims, nil)
 
 				// Setup chain client to expect call with OVERRIDE AppID
@@ -807,7 +823,7 @@ func TestHandleEnv_DebugModeAppIDOverride(t *testing.T) {
 				tc.setupAttestation(setup, claims)
 
 				setup.MockAttestation.EXPECT().
-					VerifyAttestation(gomock.Any(), gomock.Any()).
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
 					Return(claims, nil)
 
 				requestBody := tc.getRequestBody(setup)
@@ -839,7 +855,7 @@ func TestHandleEnv_V1_WithNonce(t *testing.T) {
 		}
 
 		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.GoogleConfidentialSpace).
 			Return(claims, nil)
 
 		requestBody, _ := json.Marshal(setup.EnvRequestV1)
@@ -869,7 +885,7 @@ func TestHandleEnvV2_NonceValidation(t *testing.T) {
 		}
 
 		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
 			Return(claims, nil)
 
 		requestBody, _ := json.Marshal(setup.EnvRequestV2)
@@ -895,7 +911,7 @@ func TestHandleEnvV2_NonceValidation(t *testing.T) {
 		}
 
 		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
 			Return(claims, nil)
 
 		requestBody, _ := json.Marshal(setup.EnvRequestV2)
@@ -924,7 +940,7 @@ func TestHandleEnvV2_NonceValidation(t *testing.T) {
 		}
 
 		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
 			Return(claims, nil)
 
 		// Setup successful chain client response
@@ -939,5 +955,64 @@ func TestHandleEnvV2_NonceValidation(t *testing.T) {
 		// Should succeed - nonce matches RSA key hash
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code)
+	})
+}
+
+func TestHandleEnv_V1_AcceptsIntelAttestation(t *testing.T) {
+	logger := setupEnvLogger()
+
+	t.Run("V1 endpoint accepts Intel attestation when Google fails", func(t *testing.T) {
+		setup := setupHandleEnvTest(t)
+
+		// Mock Google attestation to fail, Intel to succeed
+		claims := &attestation.AttestationClaims{
+			ImageDigest: testValidDigest,
+			AppID:       testEnvAppID,
+			Nonce:       "", // V1 requires empty nonce
+		}
+
+		setup.MockAttestation.EXPECT().
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.GoogleConfidentialSpace).
+			Return(nil, errors.New("google attestation failed"))
+
+		setup.MockAttestation.EXPECT().
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
+			Return(claims, nil)
+
+		// Setup successful chain client response
+		privateEnv := types.Env{"SECRET_KEY": "secret_value"}
+		setup.setupSuccessfulChainClient(t, testEnvAppID, privateEnv)
+
+		requestBody, _ := json.Marshal(setup.EnvRequestV1)
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
+
+		err := HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+		// Should succeed - Intel attestation worked
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code)
+	})
+}
+
+func TestHandleEnvV2_RejectsGoogleAttestation(t *testing.T) {
+	logger := setupEnvLogger()
+
+	t.Run("V2 endpoint rejects Google CS attestation", func(t *testing.T) {
+		setup := setupHandleEnvV2Test(t)
+
+		// Mock Intel attestation to fail (V2 only tries Intel)
+		setup.MockAttestation.EXPECT().
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
+			Return(nil, errors.New("intel attestation failed"))
+
+		requestBody, _ := json.Marshal(setup.EnvRequestV2)
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v2", requestBody)
+
+		err := HandleEnvV2(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+		// Should fail - V2 only accepts Intel
+		require.NoError(t, err)
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+		requireErrorResponse(t, rec, "Attestation verification failed")
 	})
 }

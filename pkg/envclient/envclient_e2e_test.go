@@ -130,8 +130,8 @@ func (ts *TestKMSServer) GetKMSKeys() (encryptionKey []byte, signingKey []byte, 
 func (ts *TestKMSServer) SetupSuccessfulMocks(t *testing.T, appID string, privateEnv types.Env) {
 	// Setup attestation mock to extract nonce from JWT
 	ts.MockAttestation.EXPECT().
-		VerifyAttestation(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, jwtString string) (*attestation.AttestationClaims, error) {
+		VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
+		DoAndReturn(func(ctx context.Context, jwtString string, provider attestation.AttestationProvider) (*attestation.AttestationClaims, error) {
 			// Parse the JWT to extract nonce
 			var claims map[string]interface{}
 			if err := json.Unmarshal([]byte(jwtString), &claims); err != nil {

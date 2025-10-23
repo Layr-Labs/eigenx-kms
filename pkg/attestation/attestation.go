@@ -20,12 +20,22 @@ import (
 const (
 	instanceNameDelimiter     = "-"
 	confidentialSpaceJWKURL   = "https://www.googleapis.com/service_accounts/v1/metadata/jwk/signer@confidentialspace-sign.iam.gserviceaccount.com"
-	confidentialSpaceIssuer   = "https://confidentialcomputing.googleapis.com"
-	confidentialSpaceAudience = "https://sts.googleapis.com"
+	intelTrustAuthorityJWKURL = "https://portal.trustauthority.intel.com/certs"
+	googleIssuer              = "https://confidentialcomputing.googleapis.com"
+	intelIssuer               = "https://portal.trustauthority.intel.com"
+	googleAudience            = "https://sts.googleapis.com"
+)
+
+// AttestationProvider specifies which attestation service to use for verification
+type AttestationProvider int
+
+const (
+	GoogleConfidentialSpace AttestationProvider = iota
+	IntelTrustAuthority
 )
 
 type AttestationVerifierInterface interface {
-	VerifyAttestation(ctx context.Context, tokenString string) (*AttestationClaims, error)
+	VerifyAttestation(ctx context.Context, tokenString string, provider AttestationProvider) (*AttestationClaims, error)
 }
 
 type AttestationClaims struct {
@@ -71,44 +81,79 @@ type GCE struct {
 }
 
 type AttestationVerifier struct {
-	logger    *slog.Logger
-	jwksCache jwk.Set
-	projectID string
-	debugMode bool
+	logger          *slog.Logger
+	googleJwksCache jwk.Set
+	intelJwksCache  jwk.Set
+	projectID       string
+	debugMode       bool
 }
 
 func NewAttestationVerifier(ctx context.Context, logger *slog.Logger, projectID string, refreshInterval time.Duration, debugMode bool) (*AttestationVerifier, error) {
 	avLogger := logger.With("component", "attestation_verifier")
 	avLogger.Debug("Initializing attestation verifier", "project_id", projectID, "refresh_interval", refreshInterval)
 
-	avLogger.Debug("Creating JWK cache", "jwk_url", confidentialSpaceJWKURL)
-	jwksCache, err := NewJWKCache(ctx, confidentialSpaceJWKURL, refreshInterval)
+	avLogger.Debug("Creating Google Confidential Space JWK cache", "jwk_url", confidentialSpaceJWKURL)
+	googleJwksCache, err := NewJWKCache(ctx, confidentialSpaceJWKURL, refreshInterval)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create JWK cache: %w", err)
+		return nil, fmt.Errorf("failed to create Google JWK cache: %w", err)
 	}
+
+	avLogger.Debug("Creating Intel Trust Authority JWK cache", "jwk_url", intelTrustAuthorityJWKURL)
+	intelJwksCache, err := NewJWKCache(ctx, intelTrustAuthorityJWKURL, refreshInterval)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Intel JWK cache: %w", err)
+	}
+
 	avLogger.Info("Attestation verifier initialized successfully", "project_id", projectID)
 
 	return &AttestationVerifier{
-		logger:    avLogger,
-		projectID: projectID,
-		jwksCache: jwksCache,
-		debugMode: debugMode,
+		logger:          avLogger,
+		projectID:       projectID,
+		googleJwksCache: googleJwksCache,
+		intelJwksCache:  intelJwksCache,
+		debugMode:       debugMode,
 	}, nil
 }
 
-func (av *AttestationVerifier) VerifyAttestation(ctx context.Context, tokenString string) (*AttestationClaims, error) {
-	av.logger.Debug("Starting attestation verification", "token_length", len(tokenString))
+func (av *AttestationVerifier) VerifyAttestation(ctx context.Context, tokenString string, provider AttestationProvider) (*AttestationClaims, error) {
+	av.logger.Debug("Starting attestation verification", "token_length", len(tokenString), "provider", provider)
+
+	// Select the appropriate JWKS cache based on provider
+	var jwksCache jwk.Set
+	switch provider {
+	case GoogleConfidentialSpace:
+		jwksCache = av.googleJwksCache
+	case IntelTrustAuthority:
+		jwksCache = av.intelJwksCache
+	default:
+		return nil, fmt.Errorf("unknown attestation provider: %d", provider)
+	}
 
 	// Parse and verify the token
 	av.logger.Debug("Parsing and verifying JWT token")
 	token, err := jwt.Parse(
 		[]byte(tokenString),
-		jwt.WithKeySet(av.jwksCache),
+		jwt.WithKeySet(jwksCache),
 		jwt.WithValidate(true),
-		jwt.WithIssuer(confidentialSpaceIssuer),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("token parsing/verification failed: %w", err)
+	}
+
+	// Validate issuer
+	issuer, ok := token.Issuer()
+	if !ok {
+		return nil, fmt.Errorf("issuer claim not found in token")
+	}
+	expectedIssuer := ""
+	switch provider {
+	case GoogleConfidentialSpace:
+		expectedIssuer = googleIssuer
+	case IntelTrustAuthority:
+		expectedIssuer = intelIssuer
+	}
+	if issuer != expectedIssuer {
+		return nil, fmt.Errorf("invalid issuer: expected %s, got %s", expectedIssuer, issuer)
 	}
 
 	// Validate audience - accept either Google STS or EigenX KMS audience
@@ -121,8 +166,8 @@ func (av *AttestationVerifier) VerifyAttestation(ctx context.Context, tokenStrin
 		return nil, fmt.Errorf("audience must contain exactly one value, got %d", len(audiences))
 	}
 	audStr := audiences[0]
-	if audStr != confidentialSpaceAudience && audStr != types.JWTAudience {
-		return nil, fmt.Errorf("invalid audience: expected %s or %s, got %s", confidentialSpaceAudience, types.JWTAudience, audStr)
+	if audStr != googleAudience && audStr != types.JWTAudience {
+		return nil, fmt.Errorf("invalid audience: expected %s or %s, got %s", googleAudience, types.JWTAudience, audStr)
 	}
 
 	csToken := &ConfidentialSpaceToken{}
