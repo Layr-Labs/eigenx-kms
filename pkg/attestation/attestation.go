@@ -48,24 +48,24 @@ type AttestationClaims struct {
 
 // Structured types for attestation token parsing
 type ConfidentialSpaceToken struct {
-	Issuer      string   `json:"iss"`
-	Audience    any      `json:"aud"`
-	Exp         int64    `json:"exp"`
-	Nbf         int64    `json:"nbf"`
-	EatNonce    any      `json:"eat_nonce,omitempty"` // string for Google, []string for Intel
-	SwName      string   `json:"swname"`
-	AttesterTCB []string `json:"attester_tcb,omitempty"` // Only in Google CS
-	HwModel     string   `json:"hwmodel"`
-	DbgStat     string   `json:"dbgstat"`
-	SwVersion   []string `json:"swversion"`
-	SubMods     SubMods  `json:"submods"`
+	Issuer      string     `json:"iss"`
+	Audience    any        `json:"aud"`
+	Exp         int64      `json:"exp"`
+	Nbf         int64      `json:"nbf"`
+	EatNonce    any        `json:"eat_nonce,omitempty"` // string for Google, []string for Intel
+	SwName      string     `json:"swname"`
+	AttesterTCB []string   `json:"attester_tcb,omitempty"` // Only in Google CS
+	HwModel     string     `json:"hwmodel"`
+	DbgStat     string     `json:"dbgstat"`
+	SwVersion   []string   `json:"swversion"`
+	SubMods     SubMods    `json:"submods"`
+	TDXSubMods  TDXSubMods `json:"tdx,omitempty"` // Only in Intel
 }
 
 type SubMods struct {
 	Container         Container         `json:"container"`
 	GCE               GCE               `json:"gce"`
 	ConfidentialSpace ConfidentialSpace `json:"confidential_space"`
-	TDX               *TDXSubMods       `json:"tdx,omitempty"` // Only in Intel
 }
 
 type TDXSubMods struct {
@@ -307,13 +307,13 @@ func (av *AttestationVerifier) validateToken(csToken *ConfidentialSpaceToken, cf
 
 	// Validate TDX submods (Intel only)
 	if cfg.requireTDXSubmods {
-		if csToken.SubMods.TDX == nil {
+		if csToken.TDXSubMods.GcpAttesterTcbStatus == "" {
 			return fmt.Errorf("tdx submods not found in Intel Trust Authority token")
 		}
-		if csToken.SubMods.TDX.GcpAttesterTcbStatus != "UpToDate" {
-			return fmt.Errorf("invalid tdx.gcp_attester_tcb_status: %s. Expected UpToDate", csToken.SubMods.TDX.GcpAttesterTcbStatus)
+		if csToken.TDXSubMods.GcpAttesterTcbStatus != "UpToDate" {
+			return fmt.Errorf("invalid tdx.gcp_attester_tcb_status: %s. Expected UpToDate", csToken.TDXSubMods.GcpAttesterTcbStatus)
 		}
-		av.logger.Debug("TDX TCB status validated", "gcp_attester_tcb_status", csToken.SubMods.TDX.GcpAttesterTcbStatus)
+		av.logger.Debug("TDX TCB status validated", "gcp_attester_tcb_status", csToken.TDXSubMods.GcpAttesterTcbStatus)
 	}
 
 	// Validate debug status and support attributes - only check in production (non-debug) mode

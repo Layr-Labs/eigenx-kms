@@ -22,12 +22,19 @@ func createProductionCsToken(provider AttestationProvider) ConfidentialSpaceToke
 	hwmodel := "GCP_INTEL_TDX"
 	attesterTcb := `"attester_tcb": ["INTEL"],`
 	supportAttr := "STABLE"
+	tdxField := ""
 
 	if provider == IntelTrustAuthority {
 		issuer = "https://portal.trustauthority.intel.com"
 		hwmodel = "INTEL_TDX"
 		attesterTcb = "" // Intel tokens don't have attester_tcb field
 		supportAttr = "EXPERIMENTAL"
+		// TDX field is at root level for Intel tokens
+		tdxField = `,
+		"tdx": {
+			"gcp_attester_tcb_status": "UpToDate",
+			"gcp_attester_tcb_date": "2024-03-13T00:00:00Z"
+		}`
 	}
 
 	realTokenJSON := `{
@@ -72,12 +79,9 @@ func createProductionCsToken(provider AttestationProvider) ConfidentialSpaceToke
 				"instance_name": "tee-0xb69a8c848a4b79f4c1810c31156d80e7eaff874a",
 				"instance_id": "8114146583384593350"
 			},
-			"tdx": {
-				"gcp_attester_tcb_status": "UpToDate",
-				"gcp_attester_tcb_date": "2024-03-13T00:00:00Z"
-			},
 			"google_service_accounts": ["889537417991-compute@developer.gserviceaccount.com"]
 		}
+		` + tdxField + `
 	}`
 
 	var token ConfidentialSpaceToken
@@ -448,13 +452,13 @@ func TestValidationLogic(t *testing.T) {
 	// Intel Trust Authority specific tests
 	t.Run("Intel: invalid TDX TCB status", func(t *testing.T) {
 		csToken := createProductionCsToken(IntelTrustAuthority)
-		csToken.SubMods.TDX.GcpAttesterTcbStatus = "OutOfDate"
+		csToken.TDXSubMods.GcpAttesterTcbStatus = "OutOfDate"
 		testValidation(t, verifier, csToken, IntelTrustAuthority, true, "invalid tdx.gcp_attester_tcb_status")
 	})
 
 	t.Run("Intel: missing TDX submods", func(t *testing.T) {
 		csToken := createProductionCsToken(IntelTrustAuthority)
-		csToken.SubMods.TDX = nil
+		csToken.TDXSubMods = TDXSubMods{}
 		testValidation(t, verifier, csToken, IntelTrustAuthority, true, "tdx submods not found")
 	})
 
