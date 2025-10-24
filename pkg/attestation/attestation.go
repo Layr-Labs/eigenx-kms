@@ -14,6 +14,7 @@ import (
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
 	"github.com/lestrrat-go/httprc/v3"
 	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v3/jws"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 )
 
@@ -142,17 +143,17 @@ func (av *AttestationVerifier) VerifyAttestation(ctx context.Context, tokenStrin
 		return nil, fmt.Errorf("unknown attestation provider: %d", provider)
 	}
 
-	for _, v := range jwksCache.Keys() {
-		av.logger.Debug("JWK key available", "key_id", v)
+	// Filter JWKS by token algorithm to handle duplicate key IDs
+	filteredKeySet, err := getFilteredKeySetForToken(tokenString, jwksCache, av.logger)
+	if err != nil {
+		return nil, err
 	}
-	// print the token TODO: remove
-	av.logger.Debug("Attestation token", "token", tokenString)
 
-	// Parse and verify the token
+	// Parse and verify the token with the filtered key set
 	av.logger.Debug("Parsing and verifying JWT token", "provider", provider)
 	token, err := jwt.Parse(
 		[]byte(tokenString),
-		jwt.WithKeySet(jwksCache),
+		jwt.WithKeySet(filteredKeySet),
 		jwt.WithValidate(true),
 	)
 	if err != nil {
@@ -377,4 +378,55 @@ func NewJWKCache(ctx context.Context, jwkUrl string, refreshInterval time.Durati
 
 	// create the cached key set
 	return cache.CachedSet(jwkUrl)
+}
+
+// getFilteredKeySetForToken parses the token header and filters the JWKS to only include keys
+// matching the token's algorithm. This works around Intel's JWKS having duplicate key IDs
+// with different algorithms.
+func getFilteredKeySetForToken(tokenString string, jwksCache jwk.Set, logger *slog.Logger) (jwk.Set, error) {
+	// Parse JWS message to extract header
+	msg, err := jws.Parse([]byte(tokenString))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JWS message: %w", err)
+	}
+
+	// Get the first signature's header (there should only be one)
+	if len(msg.Signatures()) == 0 {
+		return nil, fmt.Errorf("token has no signatures")
+	}
+	header := msg.Signatures()[0].ProtectedHeaders()
+
+	// Get the algorithm and key ID from the header
+	tokenAlg, ok := header.Algorithm()
+	if !ok {
+		return nil, fmt.Errorf("token does not specify an algorithm")
+	}
+	keyID, ok := header.KeyID()
+	if !ok || keyID == "" {
+		return nil, fmt.Errorf("token does not specify a key ID")
+	}
+	logger.Debug("Token requirements", "kid", keyID, "algorithm", tokenAlg)
+
+	// Filter JWKS to only include keys with matching algorithm
+	filteredKeySet := jwk.NewSet()
+	for i := 0; i < jwksCache.Len(); i++ {
+		key, ok := jwksCache.Key(i)
+		if !ok {
+			continue
+		}
+		// Only add keys where the algorithm matches the token's algorithm
+		if keyAlg, ok := key.Algorithm(); ok && keyAlg == tokenAlg {
+			if kid, ok := key.KeyID(); ok {
+				logger.Debug("Added key to filtered set", "kid", kid, "algorithm", keyAlg)
+			}
+			filteredKeySet.AddKey(key)
+		}
+	}
+
+	if filteredKeySet.Len() == 0 {
+		return nil, fmt.Errorf("no keys found in JWKS matching algorithm %s", tokenAlg)
+	}
+	logger.Debug("Filtered JWKS", "original_count", jwksCache.Len(), "filtered_count", filteredKeySet.Len())
+
+	return filteredKeySet, nil
 }
