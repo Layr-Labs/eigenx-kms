@@ -19,8 +19,13 @@ import (
 func createProductionCsToken(provider AttestationProvider) ConfidentialSpaceToken {
 	// Real production token JSON structure
 	issuer := "https://confidentialcomputing.googleapis.com"
+	hwmodel := "GCP_INTEL_TDX"
+	attesterTcb := `"attester_tcb": ["INTEL"],`
+
 	if provider == IntelTrustAuthority {
 		issuer = "https://portal.trustauthority.intel.com"
+		hwmodel = "INTEL_TDX"
+		attesterTcb = "" // Intel tokens don't have attester_tcb field
 	}
 
 	realTokenJSON := `{
@@ -33,10 +38,10 @@ func createProductionCsToken(provider AttestationProvider) ConfidentialSpaceToke
 		"eat_profile": "https://cloud.google.com/confidential-computing/confidential-space/docs/reference/token-claims",
 		"secboot": true,
 		"oemid": 11129,
-		"hwmodel": "GCP_INTEL_TDX",
+		"hwmodel": "` + hwmodel + `",
 		"swname": "CONFIDENTIAL_SPACE",
 		"swversion": ["250800"],
-		"attester_tcb": ["INTEL"],
+		` + attesterTcb + `
 		"dbgstat": "disabled-since-boot",
 		"submods": {
 			"confidential_space": {
@@ -207,8 +212,13 @@ func createdSignedJWT(t *testing.T, privateKey *rsa.PrivateKey, keyID string, cs
 	return string(signed)
 }
 
-func testValidation(t *testing.T, verifier *AttestationVerifier, csToken ConfidentialSpaceToken, expectError bool, errorSubstring string) {
-	err := verifier.validateConfidentialSpaceToken(&csToken)
+func testValidation(t *testing.T, verifier *AttestationVerifier, csToken ConfidentialSpaceToken, provider AttestationProvider, expectError bool, errorSubstring string) {
+	var err error
+	if provider == GoogleConfidentialSpace {
+		err = verifier.validateConfidentialSpaceToken(&csToken)
+	} else {
+		err = verifier.validateIntelTrustAuthorityToken(&csToken)
+	}
 
 	if expectError {
 		require.Error(t, err)
@@ -356,85 +366,99 @@ func TestValidationLogic(t *testing.T) {
 
 	for _, provider := range providers {
 		t.Run("valid claims pass validation", func(t *testing.T) {
-			testValidation(t, verifier, createProductionCsToken(provider), false, "")
+			testValidation(t, verifier, createProductionCsToken(provider), provider, false, "")
 		})
 
 		t.Run("invalid software name", func(t *testing.T) {
 			claims := createProductionCsToken(provider)
 			claims.SwName = "INVALID_SOFTWARE"
-			testValidation(t, verifier, claims, true, "invalid software name")
-		})
-
-		t.Run("invalid attester TCB - empty", func(t *testing.T) {
-			csToken := createProductionCsToken(provider)
-			csToken.AttesterTCB = []string{}
-			testValidation(t, verifier, csToken, true, "invalid attester_tcb")
-		})
-
-		t.Run("invalid attester TCB - wrong value", func(t *testing.T) {
-			csToken := createProductionCsToken(provider)
-			csToken.AttesterTCB = []string{"AMD"}
-			testValidation(t, verifier, csToken, true, "invalid attester_tcb")
+			testValidation(t, verifier, claims, provider, true, "invalid software name")
 		})
 
 		t.Run("invalid hardware model", func(t *testing.T) {
 			csToken := createProductionCsToken(provider)
 			csToken.HwModel = "GCP_AMD_SEV"
-			testValidation(t, verifier, csToken, true, "invalid hwmodel")
+			testValidation(t, verifier, csToken, provider, true, "invalid hwmodel")
 		})
 
 		t.Run("invalid debug status - enabled", func(t *testing.T) {
 			csToken := createProductionCsToken(provider)
 			csToken.DbgStat = "enabled"
-			testValidation(t, verifier, csToken, true, "invalid dbgstat")
+			testValidation(t, verifier, csToken, provider, true, "invalid dbgstat")
 		})
 
 		t.Run("invalid debug status - partially disabled", func(t *testing.T) {
 			csToken := createProductionCsToken(provider)
 			csToken.DbgStat = "disabled"
-			testValidation(t, verifier, csToken, true, "invalid dbgstat")
+			testValidation(t, verifier, csToken, provider, true, "invalid dbgstat")
 		})
 
 		t.Run("valid debug status - disabled-since-boot", func(t *testing.T) {
 			csToken := createProductionCsToken(provider)
 			csToken.DbgStat = "disabled-since-boot"
-			testValidation(t, verifier, csToken, false, "")
+			testValidation(t, verifier, csToken, provider, false, "")
 		})
 
 		t.Run("invalid software version - too low", func(t *testing.T) {
 			csToken := createProductionCsToken(provider)
 			csToken.SwVersion = []string{"250299"}
-			testValidation(t, verifier, csToken, true, "invalid swversion")
+			testValidation(t, verifier, csToken, provider, true, "invalid swversion")
 		})
 
 		t.Run("valid software version - at boundary", func(t *testing.T) {
 			csToken := createProductionCsToken(provider)
 			csToken.SwVersion = []string{"250300"}
-			testValidation(t, verifier, csToken, false, "")
+			testValidation(t, verifier, csToken, provider, false, "")
 		})
 
 		t.Run("valid software version - above boundary", func(t *testing.T) {
 			csToken := createProductionCsToken(provider)
 			csToken.SwVersion = []string{"300000"}
-			testValidation(t, verifier, csToken, false, "")
-		})
-
-		t.Run("invalid support attributes", func(t *testing.T) {
-			csToken := createProductionCsToken(provider)
-			csToken.SubMods.ConfidentialSpace.SupportAttributes = []string{"USABLE"}
-			testValidation(t, verifier, csToken, true, "invalid confidential_space.support_attributes")
+			testValidation(t, verifier, csToken, provider, false, "")
 		})
 
 		t.Run("invalid project ID", func(t *testing.T) {
 			csToken := createProductionCsToken(provider)
 			csToken.SubMods.GCE.ProjectID = "wrong-project"
-			testValidation(t, verifier, csToken, true, "invalid project_id")
+			testValidation(t, verifier, csToken, provider, true, "invalid project_id")
 		})
 	}
 
+	// Google Confidential Space specific tests
+	t.Run("Google CS: invalid attester TCB - empty", func(t *testing.T) {
+		csToken := createProductionCsToken(GoogleConfidentialSpace)
+		csToken.AttesterTCB = []string{}
+		testValidation(t, verifier, csToken, GoogleConfidentialSpace, true, "invalid attester_tcb")
+	})
+
+	t.Run("Google CS: invalid attester TCB - wrong value", func(t *testing.T) {
+		csToken := createProductionCsToken(GoogleConfidentialSpace)
+		csToken.AttesterTCB = []string{"AMD"}
+		testValidation(t, verifier, csToken, GoogleConfidentialSpace, true, "invalid attester_tcb")
+	})
+
+	t.Run("Google CS: invalid support attributes", func(t *testing.T) {
+		csToken := createProductionCsToken(GoogleConfidentialSpace)
+		csToken.SubMods.ConfidentialSpace.SupportAttributes = []string{"USABLE"}
+		testValidation(t, verifier, csToken, GoogleConfidentialSpace, true, "invalid confidential_space.support_attributes")
+	})
+
+	// Intel Trust Authority specific tests
+	t.Run("Intel: invalid TDX TCB status", func(t *testing.T) {
+		csToken := createProductionCsToken(IntelTrustAuthority)
+		csToken.SubMods.TDX.GcpAttesterTcbStatus = "OutOfDate"
+		testValidation(t, verifier, csToken, IntelTrustAuthority, true, "invalid tdx.gcp_attester_tcb_status")
+	})
+
+	t.Run("Intel: missing TDX submods", func(t *testing.T) {
+		csToken := createProductionCsToken(IntelTrustAuthority)
+		csToken.SubMods.TDX = nil
+		testValidation(t, verifier, csToken, IntelTrustAuthority, true, "tdx submods not found")
+	})
+
 	t.Run("debug token fails validation", func(t *testing.T) {
 		csToken := createDebugCsToken()
-		testValidation(t, verifier, csToken, true, "") // any error is acceptable
+		testValidation(t, verifier, csToken, GoogleConfidentialSpace, true, "") // any error is acceptable
 	})
 }
 
@@ -456,14 +480,14 @@ func TestDebugModeSkipsValidation(t *testing.T) {
 		csToken := createDebugCsToken()
 		csToken.DbgStat = "enabled"
 		// Should NOT fail because debug mode is enabled
-		testValidation(t, verifier, csToken, false, "")
+		testValidation(t, verifier, csToken, GoogleConfidentialSpace, false, "")
 	})
 
 	t.Run("debug mode enabled - allows any debug status", func(t *testing.T) {
 		csToken := createDebugCsToken()
 		csToken.DbgStat = "some-random-status"
 		// Should NOT fail because debug mode is enabled
-		testValidation(t, verifier, csToken, false, "")
+		testValidation(t, verifier, csToken, GoogleConfidentialSpace, false, "")
 	})
 }
 
