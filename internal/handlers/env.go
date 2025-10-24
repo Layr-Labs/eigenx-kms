@@ -63,15 +63,10 @@ func HandleEnv(c echo.Context, logger *slog.Logger, attestationVerifier attestat
 		return returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("encryption key size mismatch: %v", err))
 	}
 
-	// Verify attestation and extract claims using the JWT (V1 accepts both Google CS and Intel)
-	// Try Google first for backward compatibility, then Intel
+	// Verify attestation and extract claims using the JWT (V1 only accepts Google CS)
 	claims, err := attestationVerifier.VerifyAttestation(ctx, jwtWithKey.JWT, attestation.GoogleConfidentialSpace)
 	if err != nil {
-		logger.Debug("Google CS attestation failed, trying Intel", "error", err)
-		claims, err = attestationVerifier.VerifyAttestation(ctx, jwtWithKey.JWT, attestation.IntelTrustAuthority)
-		if err != nil {
-			return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Attestation verification failed: %v", err))
-		}
+		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Attestation verification failed: %v", err))
 	}
 
 	logger.Debug("Attestation verified", "app_id", claims.AppID, "image_digest", claims.ImageDigest)
