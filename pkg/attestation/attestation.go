@@ -142,6 +142,12 @@ func (av *AttestationVerifier) VerifyAttestation(ctx context.Context, tokenStrin
 		return nil, fmt.Errorf("unknown attestation provider: %d", provider)
 	}
 
+	for _, v := range jwksCache.Keys() {
+		av.logger.Debug("JWK key available", "key_id", v)
+	}
+	// print the token TODO: remove
+	av.logger.Debug("Attestation token", "token", tokenString)
+
 	// Parse and verify the token
 	av.logger.Debug("Parsing and verifying JWT token", "provider", provider)
 	token, err := jwt.Parse(
@@ -214,10 +220,10 @@ func (av *AttestationVerifier) VerifyAttestation(ctx context.Context, tokenStrin
 
 // validationConfig holds provider-specific validation rules
 type validationConfig struct {
-	expectedHwModel       string
-	requireAttesterTCB    bool
-	requiredSupportAttr   string // "STABLE" for Google, "EXPERIMENTAL" for Intel
-	requireTDXSubmods     bool
+	expectedHwModel     string
+	requireAttesterTCB  bool
+	requiredSupportAttr string // "STABLE" for Google, "EXPERIMENTAL" for Intel
+	requireTDXSubmods   bool
 }
 
 var (
