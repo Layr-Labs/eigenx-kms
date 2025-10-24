@@ -21,11 +21,13 @@ func createProductionCsToken(provider AttestationProvider) ConfidentialSpaceToke
 	issuer := "https://confidentialcomputing.googleapis.com"
 	hwmodel := "GCP_INTEL_TDX"
 	attesterTcb := `"attester_tcb": ["INTEL"],`
+	supportAttr := "STABLE"
 
 	if provider == IntelTrustAuthority {
 		issuer = "https://portal.trustauthority.intel.com"
 		hwmodel = "INTEL_TDX"
 		attesterTcb = "" // Intel tokens don't have attester_tcb field
+		supportAttr = "EXPERIMENTAL"
 	}
 
 	realTokenJSON := `{
@@ -48,7 +50,7 @@ func createProductionCsToken(provider AttestationProvider) ConfidentialSpaceToke
 				"monitoring_enabled": {
 					"memory": false
 				},
-				"support_attributes": ["STABLE"]
+				"support_attributes": ["` + supportAttr + `"]
 			},
 			"container": {
 				"image_reference": "index.docker.io/saucelord/account-printer@sha256:1580f84f1585dbecd84479ae867b6d586de31a19bbc9e551f2fbc20f9df59ec9",
@@ -454,6 +456,24 @@ func TestValidationLogic(t *testing.T) {
 		csToken := createProductionCsToken(IntelTrustAuthority)
 		csToken.SubMods.TDX = nil
 		testValidation(t, verifier, csToken, IntelTrustAuthority, true, "tdx submods not found")
+	})
+
+	t.Run("Intel: requires EXPERIMENTAL support attributes", func(t *testing.T) {
+		csToken := createProductionCsToken(IntelTrustAuthority)
+		csToken.SubMods.ConfidentialSpace.SupportAttributes = []string{"EXPERIMENTAL"}
+		testValidation(t, verifier, csToken, IntelTrustAuthority, false, "")
+	})
+
+	t.Run("Intel: rejects STABLE support attributes", func(t *testing.T) {
+		csToken := createProductionCsToken(IntelTrustAuthority)
+		csToken.SubMods.ConfidentialSpace.SupportAttributes = []string{"STABLE"}
+		testValidation(t, verifier, csToken, IntelTrustAuthority, true, "Expected to contain EXPERIMENTAL")
+	})
+
+	t.Run("Intel: rejects missing EXPERIMENTAL", func(t *testing.T) {
+		csToken := createProductionCsToken(IntelTrustAuthority)
+		csToken.SubMods.ConfidentialSpace.SupportAttributes = []string{"USABLE"}
+		testValidation(t, verifier, csToken, IntelTrustAuthority, true, "Expected to contain EXPERIMENTAL")
 	})
 
 	t.Run("debug token fails validation", func(t *testing.T) {

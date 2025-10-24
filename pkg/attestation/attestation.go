@@ -214,25 +214,25 @@ func (av *AttestationVerifier) VerifyAttestation(ctx context.Context, tokenStrin
 
 // validationConfig holds provider-specific validation rules
 type validationConfig struct {
-	expectedHwModel          string
-	requireAttesterTCB       bool
-	requireStableSupportAttr bool
-	requireTDXSubmods        bool
+	expectedHwModel       string
+	requireAttesterTCB    bool
+	requiredSupportAttr   string // "STABLE" for Google, "EXPERIMENTAL" for Intel
+	requireTDXSubmods     bool
 }
 
 var (
 	googleValidationConfig = validationConfig{
-		expectedHwModel:          "GCP_INTEL_TDX",
-		requireAttesterTCB:       true,
-		requireStableSupportAttr: true,
-		requireTDXSubmods:        false,
+		expectedHwModel:     "GCP_INTEL_TDX",
+		requireAttesterTCB:  true,
+		requiredSupportAttr: "STABLE",
+		requireTDXSubmods:   false,
 	}
 
 	intelValidationConfig = validationConfig{
-		expectedHwModel:          "INTEL_TDX",
-		requireAttesterTCB:       false,
-		requireStableSupportAttr: false,
-		requireTDXSubmods:        true,
+		expectedHwModel:     "INTEL_TDX",
+		requireAttesterTCB:  false,
+		requiredSupportAttr: "EXPERIMENTAL",
+		requireTDXSubmods:   true,
 	}
 )
 
@@ -314,15 +314,11 @@ func (av *AttestationVerifier) validateToken(csToken *ConfidentialSpaceToken, cf
 		if csToken.DbgStat != "disabled-since-boot" {
 			return fmt.Errorf("invalid dbgstat: %s. Expected disabled-since-boot", csToken.DbgStat)
 		}
-		if cfg.requireStableSupportAttr {
-			supportAttrs := csToken.SubMods.ConfidentialSpace.SupportAttributes
-			if !slices.Contains(supportAttrs, "STABLE") {
-				return fmt.Errorf("invalid confidential_space.support_attributes: %v. Expected to contain STABLE", supportAttrs)
-			}
-			av.logger.Debug("Confidential space support attributes validated", "support_attributes", supportAttrs)
-		} else {
-			av.logger.Debug("Debug status validated", "dbgstat", csToken.DbgStat)
+		supportAttrs := csToken.SubMods.ConfidentialSpace.SupportAttributes
+		if !slices.Contains(supportAttrs, cfg.requiredSupportAttr) {
+			return fmt.Errorf("invalid confidential_space.support_attributes: %v. Expected to contain %s", supportAttrs, cfg.requiredSupportAttr)
 		}
+		av.logger.Debug("Confidential space support attributes validated", "support_attributes", supportAttrs, "required", cfg.requiredSupportAttr)
 	} else {
 		av.logger.Debug("Debug mode enabled, skipping support and debug status validation")
 	}
