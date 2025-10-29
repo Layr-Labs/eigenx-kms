@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -33,6 +34,35 @@ const (
 	testMnemonic    = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 	testValidDigest = "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 )
+
+// mockAttestationTokenProvider is a mock implementation of AttestationTokenProvider for testing
+type mockAttestationTokenProvider struct {
+	baseToken string // Token template without nonce
+	err       error
+}
+
+func (m *mockAttestationTokenProvider) GetToken(ctx context.Context, nonce string) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+
+	// Parse the base token to add nonce
+	var claims map[string]interface{}
+	if err := json.Unmarshal([]byte(m.baseToken), &claims); err != nil {
+		return "", fmt.Errorf("failed to parse base token: %w", err)
+	}
+
+	// Add nonce to the claims
+	claims["eat_nonce"] = nonce
+
+	// Marshal back to JSON
+	tokenWithNonce, err := json.Marshal(claims)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal token with nonce: %w", err)
+	}
+
+	return string(tokenWithNonce), nil
+}
 
 // TestKMSServer represents a test KMS server setup
 type TestKMSServer struct {
@@ -60,6 +90,9 @@ func NewTestKMSServer(t *testing.T) *TestKMSServer {
 	e := echo.New()
 	e.POST("/env", func(c echo.Context) error {
 		return handlers.HandleEnv(c, logger, mockAttestation, mockChainClient, fakeKMS, true) // debug mode enabled
+	})
+	e.POST("/env/v2", func(c echo.Context) error {
+		return handlers.HandleEnvV2(c, logger, mockAttestation, mockChainClient, fakeKMS, true) // debug mode enabled
 	})
 	e.GET("/health", func(c echo.Context) error {
 		return handlers.HandleHealth(c)
@@ -95,13 +128,30 @@ func (ts *TestKMSServer) GetKMSKeys() (encryptionKey []byte, signingKey []byte, 
 
 // SetupSuccessfulMocks configures the test server for successful responses
 func (ts *TestKMSServer) SetupSuccessfulMocks(t *testing.T, appID string, privateEnv types.Env) {
-	// Setup attestation mock
+	// Setup attestation mock to extract nonce from JWT
 	ts.MockAttestation.EXPECT().
-		VerifyAttestation(gomock.Any(), gomock.Any()).
-		Return(&attestation.AttestationClaims{
-			ImageDigest: testValidDigest,
-			AppID:       appID,
-		}, nil)
+		VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
+		DoAndReturn(func(ctx context.Context, jwtString string, provider attestation.AttestationProvider) (*attestation.AttestationClaims, error) {
+			// Parse the JWT to extract nonce
+			var claims map[string]interface{}
+			if err := json.Unmarshal([]byte(jwtString), &claims); err != nil {
+				return nil, fmt.Errorf("failed to parse JWT: %w", err)
+			}
+
+			// Extract nonce if present
+			var nonce string
+			if nonceRaw, ok := claims["eat_nonce"]; ok {
+				if nonceStr, ok := nonceRaw.(string); ok {
+					nonce = nonceStr
+				}
+			}
+
+			return &attestation.AttestationClaims{
+				ImageDigest: testValidDigest,
+				AppID:       appID,
+				Nonce:       nonce,
+			}, nil
+		})
 
 	// Setup chain client mock
 	hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
@@ -135,15 +185,18 @@ func TestEnvClient_E2E_Success(t *testing.T) {
 	}
 	testServer.SetupSuccessfulMocks(t, testAppID, privateEnv)
 
-	// Get KMS keys
-	encryptionKey, signingKey, err := testServer.GetKMSKeys()
+	// Get KMS signing key
+	_, signingKey, err := testServer.GetKMSKeys()
 	require.NoError(t, err)
 
 	// Create a mock JWT
-	mockJWT := []byte(`{"sub":"test-app","iat":1234567890,"app_id":"` + testAppID + `"}`)
+	mockJWT := `{"sub":"test-app","iat":1234567890,"app_id":"` + testAppID + `"}`
+
+	// Create mock token provider
+	mockTokenProvider := &mockAttestationTokenProvider{baseToken: mockJWT}
 
 	// Create EnvClient
-	client := NewEnvClient(testServer.Logger, mockJWT, encryptionKey, signingKey, testServer.Server.URL)
+	client := NewEnvClient(testServer.Logger, mockTokenProvider, signingKey, testServer.Server.URL)
 
 	// Test the GetEnv method
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -170,11 +223,7 @@ func TestEnvClient_E2E_Success(t *testing.T) {
 func TestEnvClient_E2E_InvalidSignature(t *testing.T) {
 	testServer := NewTestKMSServer(t)
 
-	// Get encryption key but use wrong signing key
-	encryptionKey, _, err := testServer.GetKMSKeys()
-	require.NoError(t, err)
-
-	// Generate a different signing key
+	// Generate a wrong signing key
 	// Generate ECDSA key for signing (P-256 curve)
 	wrongSigningECDSAKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
@@ -189,8 +238,9 @@ func TestEnvClient_E2E_InvalidSignature(t *testing.T) {
 	privateEnv := types.Env{"SECRET_KEY": "test_secret"}
 	testServer.SetupSuccessfulMocks(t, testAppID, privateEnv)
 
-	mockJWT := []byte(`{"sub":"test-app","iat":1234567890}`)
-	client := NewEnvClient(testServer.Logger, mockJWT, encryptionKey, wrongSigningKey, testServer.Server.URL)
+	mockJWT := `{"sub":"test-app","iat":1234567890,"app_id":"` + testAppID + `"}`
+	mockTokenProvider := &mockAttestationTokenProvider{baseToken: mockJWT}
+	client := NewEnvClient(testServer.Logger, mockTokenProvider, wrongSigningKey, testServer.Server.URL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -204,14 +254,13 @@ func TestEnvClient_E2E_ServerDown(t *testing.T) {
 	// Don't create a server - test connection failure
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	// Use fake keys for this test
-	_, encryptionKey, err := crypto.GenerateRSAKeyPair()
-	require.NoError(t, err)
+	// Use fake signing key for this test
 	_, signingKey, err := crypto.GenerateRSAKeyPair()
 	require.NoError(t, err)
 
-	mockJWT := []byte(`{"sub":"test-app","iat":1234567890}`)
-	client := NewEnvClient(logger, mockJWT, []byte(encryptionKey), []byte(signingKey), "http://localhost:99999") // non-existent server
+	mockJWT := `{"sub":"test-app","iat":1234567890,"app_id":"` + testAppID + `"}`
+	mockTokenProvider := &mockAttestationTokenProvider{baseToken: mockJWT}
+	client := NewEnvClient(logger, mockTokenProvider, []byte(signingKey), "http://localhost:99999") // non-existent server
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

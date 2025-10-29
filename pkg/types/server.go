@@ -4,21 +4,31 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+// JWTAudience is the audience claim used in attestation JWTs
+const JWTAudience = "EigenX KMS"
+
 // generic type for signed responses
 type SignedResponse[T any] struct {
 	Data      T      `json:"data"`
 	Signature []byte `json:"signature"`
 }
 
-type EnvRequest struct {
+type EnvRequestV1 struct {
 	EncryptedJWTWithRSAKey string `json:"encryptedJwtWithRsaKey"`
+}
+
+type EnvRequestV2 struct {
+	JWTWithAttestedRSAKey string `json:"jwtWithAttestedRsaKey"`
+	RSAKeyPEM             string `json:"rsaKey"`
 }
 
 type Env map[string]string
 
-type EnvResponse struct {
+type EnvResponseV1 struct {
 	EncryptedCombinedEnv string `json:"encryptedCombinedEnv"`
 }
+
+type EnvResponseV2 = EnvResponseV1
 
 type EVMAddressAndDerivationPath struct {
 	Address        common.Address `json:"address" swaggertype:"string" example:"0x1234567890abcdef1234567890abcdef12345678"`
@@ -30,7 +40,13 @@ type SolanaAddressAndDerivationPath struct {
 	DerivationPath string `json:"derivationPath"`
 }
 
-type AddressesResponse struct {
+type AddressesResponseV1 struct {
+	EVMAddresses    []EVMAddressAndDerivationPath    `json:"evmAddresses"`
+	SolanaAddresses []SolanaAddressAndDerivationPath `json:"solanaAddresses"`
+}
+
+type AddressesResponseV2 struct {
+	AppID           string                           `json:"appId"`
 	EVMAddresses    []EVMAddressAndDerivationPath    `json:"evmAddresses"`
 	SolanaAddresses []SolanaAddressAndDerivationPath `json:"solanaAddresses"`
 }

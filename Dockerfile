@@ -30,7 +30,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o kms-server cmd/km
 FROM alpine:latest
 
 # Labels to enable Confidential Space features
-LABEL tee.launch_policy.allow_cmd_override=true
 LABEL tee.launch_policy.log_redirect=always
 LABEL "tee.launch_policy.allow_env_override"="PORT,LOG_LEVEL,DEBUG_MODE,ENV_RATE_LIMIT,API_KEY,GOOGLE_CLOUD_PROJECT,ATTESTATION_PROJECT_ID,KMS_LOCATION,KMS_KEY_RING,KMS_HMAC_KEY_NAME,KMS_ENCRYPTION_KEY_NAME,KMS_SIGNING_KEY_NAME,RPC_URL,APP_CONTROLLER_ADDRESS"
 

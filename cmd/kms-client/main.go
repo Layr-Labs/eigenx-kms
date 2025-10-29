@@ -16,11 +16,9 @@ import (
 func main() {
 	app := &cli.App{
 		Name:  "kms-client",
-		Usage: "Client for requesting environment variables from KMS server with JWT + RSA authentication",
+		Usage: "Client for requesting environment variables from KMS server with attestation",
 		Flags: []cli.Flag{
 			utils.KMSServerURLFlag,
-			utils.JWTFileFlag,
-			utils.KMSEncryptionKeyFileFlag,
 			utils.KMSSigningKeyFileFlag,
 			utils.AppIDFlag,
 			utils.LogLevelFlag,
@@ -44,26 +42,17 @@ func runClient(c *cli.Context) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	// Read files
-	cfg.Logger.Debug("Reading JWT file", "file", cfg.JWTFile)
-	jwtBytes, err := os.ReadFile(cfg.JWTFile)
-	if err != nil {
-		return fmt.Errorf("failed to read JWT file: %w", err)
-	}
-
-	cfg.Logger.Debug("Reading KMS public key", "file", cfg.KMSEncryptionKey)
-	kmsEncryptionKeyBytes, err := os.ReadFile(cfg.KMSEncryptionKey)
-	if err != nil {
-		return fmt.Errorf("failed to read KMS public key: %w", err)
-	}
-
+	// Read KMS signing key
 	cfg.Logger.Debug("Reading KMS signing key", "file", cfg.KMSSigningKey)
 	kmsSigningKeyBytes, err := os.ReadFile(cfg.KMSSigningKey)
 	if err != nil {
 		return fmt.Errorf("failed to read KMS signing key: %w", err)
 	}
 
-	envClient := envclient.NewEnvClient(cfg.Logger, jwtBytes, kmsEncryptionKeyBytes, kmsSigningKeyBytes, cfg.ServerURL)
+	// Create attestation token provider
+	tokenProvider := envclient.NewConfidentialSpaceTokenProvider(cfg.Logger)
+
+	envClient := envclient.NewEnvClient(cfg.Logger, tokenProvider, kmsSigningKeyBytes, cfg.ServerURL)
 	envJSONBytes, err := envClient.GetEnv(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get env: %w", err)
