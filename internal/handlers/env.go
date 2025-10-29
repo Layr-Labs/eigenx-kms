@@ -27,7 +27,7 @@ import (
 //	@Tags			environment
 //	@Accept			json
 //	@Produce		json
-//	@Param			data	    body		types.EnvRequest	true	"Encrypted JWT + RSA public key data"
+//	@Param			data	    body		types.EnvRequestV1	true	"Encrypted JWT + RSA public key data"
 //	@Param			appID		query		string				false	"App ID override (debug mode only)"
 //	@Success		200			{object}	types.SignedResponse[types.EnvResponseV1]
 //	@Failure		400			{object}	map[string]string

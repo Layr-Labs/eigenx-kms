@@ -47,7 +47,63 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.SignedResponse-types_AddressesResponse"
+                            "$ref": "#/definitions/types.SignedResponse-types_AddressesResponseV1"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/addresses/v2": {
+            "get": {
+                "description": "Derive EVM addresses from app's HD wallet, includes appId in response",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "addresses"
+                ],
+                "summary": "Get EVM addresses (V2)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Application ID",
+                        "name": "appID",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Number of addresses to derive (default: 1, max: 100)",
+                        "name": "count",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/types.SignedResponse-types_AddressesResponseV2"
                         }
                     },
                     "400": {
@@ -91,7 +147,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.EnvRequest"
+                            "$ref": "#/definitions/types.EnvRequestV1"
                         }
                     },
                     {
@@ -105,7 +161,74 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.SignedResponse-types_EnvResponse"
+                            "$ref": "#/definitions/types.SignedResponse-types_EnvResponseV1"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/env/v2": {
+            "post": {
+                "description": "Retrieve encrypted environment variables and mnemonic for authenticated app using attested RSA key",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "environment"
+                ],
+                "summary": "Get environment variables (V2)",
+                "parameters": [
+                    {
+                        "description": "JWT with attested RSA public key",
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/types.EnvRequestV2"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "App ID override (debug mode only)",
+                        "name": "appID",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/types.SignedResponse-types_EnvResponseV2"
                         }
                     },
                     "400": {
@@ -164,9 +287,29 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "types.AddressesResponse": {
+        "types.AddressesResponseV1": {
             "type": "object",
             "properties": {
+                "evmAddresses": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.EVMAddressAndDerivationPath"
+                    }
+                },
+                "solanaAddresses": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.SolanaAddressAndDerivationPath"
+                    }
+                }
+            }
+        },
+        "types.AddressesResponseV2": {
+            "type": "object",
+            "properties": {
+                "appId": {
+                    "type": "string"
+                },
                 "evmAddresses": {
                     "type": "array",
                     "items": {
@@ -193,7 +336,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.EnvRequest": {
+        "types.EnvRequestV1": {
             "type": "object",
             "properties": {
                 "encryptedJwtWithRsaKey": {
@@ -201,7 +344,18 @@ const docTemplate = `{
                 }
             }
         },
-        "types.EnvResponse": {
+        "types.EnvRequestV2": {
+            "type": "object",
+            "properties": {
+                "jwtWithAttestedRsaKey": {
+                    "type": "string"
+                },
+                "rsaKey": {
+                    "type": "string"
+                }
+            }
+        },
+        "types.EnvResponseV1": {
             "type": "object",
             "properties": {
                 "encryptedCombinedEnv": {
@@ -209,11 +363,19 @@ const docTemplate = `{
                 }
             }
         },
-        "types.SignedResponse-types_AddressesResponse": {
+        "types.EnvResponseV2": {
+            "type": "object",
+            "properties": {
+                "encryptedCombinedEnv": {
+                    "type": "string"
+                }
+            }
+        },
+        "types.SignedResponse-types_AddressesResponseV1": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/types.AddressesResponse"
+                    "$ref": "#/definitions/types.AddressesResponseV1"
                 },
                 "signature": {
                     "type": "array",
@@ -223,11 +385,39 @@ const docTemplate = `{
                 }
             }
         },
-        "types.SignedResponse-types_EnvResponse": {
+        "types.SignedResponse-types_AddressesResponseV2": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/types.EnvResponse"
+                    "$ref": "#/definitions/types.AddressesResponseV2"
+                },
+                "signature": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "types.SignedResponse-types_EnvResponseV1": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/types.EnvResponseV1"
+                },
+                "signature": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "types.SignedResponse-types_EnvResponseV2": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/types.EnvResponseV2"
                 },
                 "signature": {
                     "type": "array",
