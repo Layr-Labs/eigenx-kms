@@ -94,7 +94,7 @@ func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, nonce str
 		return "", fmt.Errorf("failed to read attestation token response: %w", err)
 	}
 
-	p.logger.Info("Successfully obtained attestation token", "token", string(tokenBytes))
+	p.logger.Info("Successfully obtained attestation token", "token_length", len(tokenBytes))
 
 	return string(tokenBytes), nil
 }

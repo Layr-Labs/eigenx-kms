@@ -43,7 +43,6 @@ type AttestationClaims struct {
 	AppID       string `json:"app_id"`
 	ImageDigest string `json:"image_digest"`
 	Nonce       string `json:"nonce"`
-	jwt.Token
 }
 
 // Structured types for attestation token parsing
@@ -256,9 +255,6 @@ func extractNonce(eatNonce any) (string, error) {
 
 	// Try as array (Intel format)
 	if arr, ok := eatNonce.([]any); ok {
-		if len(arr) == 0 {
-			return "", nil
-		}
 		if len(arr) == 1 {
 			if s, ok := arr[0].(string); ok {
 				return s, nil
