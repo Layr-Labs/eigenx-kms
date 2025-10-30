@@ -23,6 +23,7 @@ func main() {
 			utils.AppIDFlag,
 			utils.LogLevelFlag,
 			utils.OutputFileFlag,
+			utils.UserAPIURLFlag,
 		},
 		Action: runClient,
 	}
@@ -52,7 +53,7 @@ func runClient(c *cli.Context) error {
 	// Create attestation token provider
 	tokenProvider := envclient.NewConfidentialSpaceTokenProvider(cfg.Logger)
 
-	envClient := envclient.NewEnvClient(cfg.Logger, tokenProvider, kmsSigningKeyBytes, cfg.ServerURL)
+	envClient := envclient.NewEnvClient(cfg.Logger, tokenProvider, kmsSigningKeyBytes, cfg.ServerURL, cfg.UserAPIURL)
 	envJSONBytes, err := envClient.GetEnv(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get env: %w", err)
