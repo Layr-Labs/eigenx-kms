@@ -24,6 +24,7 @@ const (
 	maxElapsedTime        = 2 * time.Minute
 	attestationSocketPath = "/run/container_launcher/teeserver.sock"
 	attestationTokenURL   = "http://localhost/v1/intel/token"
+	publicNonce           = "eigenx-dashboard"
 )
 
 // AttestationTokenProvider interface for generating attestation tokens
@@ -177,13 +178,21 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 
 	e.Logger.Info("Response decrypted successfully")
 
-	// Post JWT to user API after successful KMS response
-	e.Logger.Info("Posting JWT to user API", "url", e.userAPIURL)
-	if err := e.postJWTToUserAPI(ctx, jwt); err != nil {
-		e.Logger.Error("Failed to post JWT to user API after retries", "error", err)
+	// Generate a new JWT with empty nonce for user API upload
+	e.Logger.Info("Generating attestation token with empty nonce for user API")
+	uploadJWT, err := e.tokenProvider.GetToken(ctx, publicNonce)
+	if err != nil {
+		e.Logger.Error("Failed to get attestation token for user API", "error", err)
 		// Not a fatal error - continue with returning environment variables
 	} else {
-		e.Logger.Info("Successfully posted JWT to user API")
+		// Post JWT to user API after successful KMS response
+		e.Logger.Info("Posting JWT to user API", "url", e.userAPIURL)
+		if err := e.postJWTToUserAPI(ctx, uploadJWT); err != nil {
+			e.Logger.Error("Failed to post JWT to user API after retries", "error", err)
+			// Not a fatal error - continue with returning environment variables
+		} else {
+			e.Logger.Info("Successfully posted JWT to user API")
+		}
 	}
 
 	return envJSONBytes, nil
