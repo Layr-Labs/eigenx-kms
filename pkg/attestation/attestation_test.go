@@ -16,29 +16,48 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func createProductionCsToken() ConfidentialSpaceToken {
+func createProductionCsToken(provider AttestationProvider) ConfidentialSpaceToken {
 	// Real production token JSON structure
+	issuer := "https://confidentialcomputing.googleapis.com"
+	hwmodel := "GCP_INTEL_TDX"
+	attesterTcb := `"attester_tcb": ["INTEL"],`
+	supportAttr := "STABLE"
+	tdxField := ""
+
+	if provider == IntelTrustAuthority {
+		issuer = "https://portal.trustauthority.intel.com"
+		hwmodel = "INTEL_TDX"
+		attesterTcb = "" // Intel tokens don't have attester_tcb field
+		supportAttr = "EXPERIMENTAL"
+		// TDX field is at root level for Intel tokens
+		tdxField = `,
+		"tdx": {
+			"gcp_attester_tcb_status": "UpToDate",
+			"gcp_attester_tcb_date": "2024-03-13T00:00:00Z"
+		}`
+	}
+
 	realTokenJSON := `{
 		"aud": "https://sts.googleapis.com",
 		"exp": 1757100915,
 		"iat": 1757097315,
-		"iss": "https://confidentialcomputing.googleapis.com",
+		"iss": "` + issuer + `",
 		"nbf": 1757097315,
 		"sub": "https://www.googleapis.com/compute/v1/projects/tee-compute-sepolia-prod/zones/us-central1-c/instances/tee-0xb69a8c848a4b79f4c1810c31156d80e7eaff874a",
 		"eat_profile": "https://cloud.google.com/confidential-computing/confidential-space/docs/reference/token-claims",
 		"secboot": true,
 		"oemid": 11129,
-		"hwmodel": "GCP_INTEL_TDX",
+		"hwmodel": "` + hwmodel + `",
 		"swname": "CONFIDENTIAL_SPACE",
 		"swversion": ["250800"],
-		"attester_tcb": ["INTEL"],
+		` + attesterTcb + `
 		"dbgstat": "disabled-since-boot",
 		"submods": {
 			"confidential_space": {
 				"monitoring_enabled": {
 					"memory": false
 				},
-				"support_attributes": ["STABLE"]
+				"support_attributes": ["` + supportAttr + `"]
 			},
 			"container": {
 				"image_reference": "index.docker.io/saucelord/account-printer@sha256:1580f84f1585dbecd84479ae867b6d586de31a19bbc9e551f2fbc20f9df59ec9",
@@ -60,12 +79,9 @@ func createProductionCsToken() ConfidentialSpaceToken {
 				"instance_name": "tee-0xb69a8c848a4b79f4c1810c31156d80e7eaff874a",
 				"instance_id": "8114146583384593350"
 			},
-			"tdx": {
-				"gcp_attester_tcb_status": "UpToDate",
-				"gcp_attester_tcb_date": "2024-03-13T00:00:00Z"
-			},
 			"google_service_accounts": ["889537417991-compute@developer.gserviceaccount.com"]
 		}
+		` + tdxField + `
 	}`
 
 	var token ConfidentialSpaceToken
@@ -202,8 +218,13 @@ func createdSignedJWT(t *testing.T, privateKey *rsa.PrivateKey, keyID string, cs
 	return string(signed)
 }
 
-func testValidation(t *testing.T, verifier *AttestationVerifier, csToken ConfidentialSpaceToken, expectError bool, errorSubstring string) {
-	err := verifier.validateConfidentialSpaceToken(&csToken)
+func testValidation(t *testing.T, verifier *AttestationVerifier, csToken ConfidentialSpaceToken, provider AttestationProvider, expectError bool, errorSubstring string) {
+	var err error
+	if provider == GoogleConfidentialSpace {
+		err = verifier.validateConfidentialSpaceToken(&csToken)
+	} else {
+		err = verifier.validateIntelTrustAuthorityToken(&csToken)
+	}
 
 	if expectError {
 		require.Error(t, err)
@@ -247,61 +268,89 @@ func TestVerifyAttestation(t *testing.T) {
 
 	// Create verifier with mock JWK set and debug mode enabled
 	verifier := &AttestationVerifier{
-		logger:    logger,
-		projectID: projectID,
-		jwksCache: jwkSet,
-		debugMode: true, // Enable debug mode to allow dbgstat="enabled"
+		logger:          logger,
+		projectID:       projectID,
+		googleJwksCache: jwkSet,
+		intelJwksCache:  jwkSet, // Use same mock JWKS for both providers in tests
+		debugMode:       true,   // Enable debug mode to allow dbgstat="enabled"
 	}
 
-	t.Run("valid attestation with jwt verification", func(t *testing.T) {
-		token := createdSignedJWT(t, privateKey, keyID, createProductionCsToken())
+	// Test both Google and Intel providers
+	providers := []AttestationProvider{GoogleConfidentialSpace, IntelTrustAuthority}
 
-		claims, err := verifier.VerifyAttestation(ctx, token)
-		require.NoError(t, err)
-		require.NotNil(t, claims)
-		require.Equal(t, "0xb69a8c848a4b79f4c1810c31156d80e7eaff874a", claims.AppID)
-		require.Equal(t, "sha256:1580f84f1585dbecd84479ae867b6d586de31a19bbc9e551f2fbc20f9df59ec9", claims.ImageDigest)
-	})
+	for _, provider := range providers {
+		t.Run("valid attestation with jwt verification", func(t *testing.T) {
+			token := createdSignedJWT(t, privateKey, keyID, createProductionCsToken(provider))
 
-	t.Run("invalid issuer", func(t *testing.T) {
-		csToken := createProductionCsToken()
-		csToken.Issuer = "https://malicious.com"
-		token := createdSignedJWT(t, privateKey, keyID, csToken)
+			claims, err := verifier.VerifyAttestation(ctx, token, provider)
+			require.NoError(t, err)
+			require.NotNil(t, claims)
+			require.Equal(t, "0xb69a8c848a4b79f4c1810c31156d80e7eaff874a", claims.AppID)
+			require.Equal(t, "sha256:1580f84f1585dbecd84479ae867b6d586de31a19bbc9e551f2fbc20f9df59ec9", claims.ImageDigest)
+		})
 
-		_, err := verifier.VerifyAttestation(ctx, token)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "claim \"iss\" does not have the expected value")
-	})
+		t.Run("invalid issuer", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.Issuer = "https://malicious.com"
+			token := createdSignedJWT(t, privateKey, keyID, csToken)
 
-	t.Run("invalid audience", func(t *testing.T) {
-		csToken := createProductionCsToken()
-		csToken.Audience = "https://malicious.com"
-		token := createdSignedJWT(t, privateKey, keyID, csToken)
+			_, err := verifier.VerifyAttestation(ctx, token, provider)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "invalid issuer")
+		})
 
-		_, err := verifier.VerifyAttestation(ctx, token)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "\"aud\" not satisfied")
-	})
+		t.Run("valid Google STS audience", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.Audience = "https://sts.googleapis.com"
+			token := createdSignedJWT(t, privateKey, keyID, csToken)
 
-	t.Run("invalid exp", func(t *testing.T) {
-		csToken := createProductionCsToken()
-		csToken.Exp = time.Now().Add(-1 * time.Hour).Unix()
-		token := createdSignedJWT(t, privateKey, keyID, csToken)
+			claims, err := verifier.VerifyAttestation(ctx, token, provider)
+			require.NoError(t, err)
+			require.NotNil(t, claims)
+			require.Equal(t, "0xb69a8c848a4b79f4c1810c31156d80e7eaff874a", claims.AppID)
+		})
 
-		_, err := verifier.VerifyAttestation(ctx, token)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "token is expired")
-	})
+		t.Run("valid EigenX KMS audience", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.Audience = "EigenX KMS"
+			token := createdSignedJWT(t, privateKey, keyID, csToken)
 
-	t.Run("invalid nbf", func(t *testing.T) {
-		csToken := createProductionCsToken()
-		csToken.Nbf = time.Now().Add(1 * time.Hour).Unix()
-		token := createdSignedJWT(t, privateKey, keyID, csToken)
+			claims, err := verifier.VerifyAttestation(ctx, token, provider)
+			require.NoError(t, err)
+			require.NotNil(t, claims)
+			require.Equal(t, "0xb69a8c848a4b79f4c1810c31156d80e7eaff874a", claims.AppID)
+		})
 
-		_, err := verifier.VerifyAttestation(ctx, token)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "token is not yet valid")
-	})
+		t.Run("invalid audience", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.Audience = "https://malicious.com"
+			token := createdSignedJWT(t, privateKey, keyID, csToken)
+
+			_, err := verifier.VerifyAttestation(ctx, token, provider)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "invalid audience")
+		})
+
+		t.Run("invalid exp", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.Exp = time.Now().Add(-1 * time.Hour).Unix()
+			token := createdSignedJWT(t, privateKey, keyID, csToken)
+
+			_, err := verifier.VerifyAttestation(ctx, token, provider)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "token is expired")
+		})
+
+		t.Run("invalid nbf", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.Nbf = time.Now().Add(1 * time.Hour).Unix()
+			token := createdSignedJWT(t, privateKey, keyID, csToken)
+
+			_, err := verifier.VerifyAttestation(ctx, token, provider)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "token is not yet valid")
+		})
+	}
 }
 
 // TestValidationLogic tests the business logic validation using the extracted function
@@ -311,91 +360,129 @@ func TestValidationLogic(t *testing.T) {
 
 	// Create a mock verifier for testing validation logic
 	verifier := &AttestationVerifier{
-		logger:    logger,
-		projectID: projectID,
-		jwksCache: nil,   // We'll bypass JWT verification
-		debugMode: false, // Disable debug mode for these tests
+		logger:          logger,
+		projectID:       projectID,
+		googleJwksCache: nil,   // We'll bypass JWT verification
+		intelJwksCache:  nil,   // We'll bypass JWT verification
+		debugMode:       false, // Disable debug mode for these tests
 	}
 
-	t.Run("valid claims pass validation", func(t *testing.T) {
-		testValidation(t, verifier, createProductionCsToken(), false, "")
-	})
+	// Test both Google and Intel providers
+	providers := []AttestationProvider{GoogleConfidentialSpace, IntelTrustAuthority}
 
-	t.Run("invalid software name", func(t *testing.T) {
-		claims := createProductionCsToken()
-		claims.SwName = "INVALID_SOFTWARE"
-		testValidation(t, verifier, claims, true, "invalid software name")
-	})
+	for _, provider := range providers {
+		t.Run("valid claims pass validation", func(t *testing.T) {
+			testValidation(t, verifier, createProductionCsToken(provider), provider, false, "")
+		})
 
-	t.Run("invalid attester TCB - empty", func(t *testing.T) {
-		csToken := createProductionCsToken()
+		t.Run("invalid software name", func(t *testing.T) {
+			claims := createProductionCsToken(provider)
+			claims.SwName = "INVALID_SOFTWARE"
+			testValidation(t, verifier, claims, provider, true, "invalid software name")
+		})
+
+		t.Run("invalid hardware model", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.HwModel = "GCP_AMD_SEV"
+			testValidation(t, verifier, csToken, provider, true, "invalid hwmodel")
+		})
+
+		t.Run("invalid debug status - enabled", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.DbgStat = "enabled"
+			testValidation(t, verifier, csToken, provider, true, "invalid dbgstat")
+		})
+
+		t.Run("invalid debug status - partially disabled", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.DbgStat = "disabled"
+			testValidation(t, verifier, csToken, provider, true, "invalid dbgstat")
+		})
+
+		t.Run("valid debug status - disabled-since-boot", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.DbgStat = "disabled-since-boot"
+			testValidation(t, verifier, csToken, provider, false, "")
+		})
+
+		t.Run("invalid software version - too low", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.SwVersion = []string{"250299"}
+			testValidation(t, verifier, csToken, provider, true, "invalid swversion")
+		})
+
+		t.Run("valid software version - at boundary", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.SwVersion = []string{"250300"}
+			testValidation(t, verifier, csToken, provider, false, "")
+		})
+
+		t.Run("valid software version - above boundary", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.SwVersion = []string{"300000"}
+			testValidation(t, verifier, csToken, provider, false, "")
+		})
+
+		t.Run("invalid project ID", func(t *testing.T) {
+			csToken := createProductionCsToken(provider)
+			csToken.SubMods.GCE.ProjectID = "wrong-project"
+			testValidation(t, verifier, csToken, provider, true, "invalid project_id")
+		})
+	}
+
+	// Google Confidential Space specific tests
+	t.Run("Google CS: invalid attester TCB - empty", func(t *testing.T) {
+		csToken := createProductionCsToken(GoogleConfidentialSpace)
 		csToken.AttesterTCB = []string{}
-		testValidation(t, verifier, csToken, true, "invalid attester_tcb")
+		testValidation(t, verifier, csToken, GoogleConfidentialSpace, true, "invalid attester_tcb")
 	})
 
-	t.Run("invalid attester TCB - wrong value", func(t *testing.T) {
-		csToken := createProductionCsToken()
+	t.Run("Google CS: invalid attester TCB - wrong value", func(t *testing.T) {
+		csToken := createProductionCsToken(GoogleConfidentialSpace)
 		csToken.AttesterTCB = []string{"AMD"}
-		testValidation(t, verifier, csToken, true, "invalid attester_tcb")
+		testValidation(t, verifier, csToken, GoogleConfidentialSpace, true, "invalid attester_tcb")
 	})
 
-	t.Run("invalid hardware model", func(t *testing.T) {
-		csToken := createProductionCsToken()
-		csToken.HwModel = "GCP_AMD_SEV"
-		testValidation(t, verifier, csToken, true, "invalid hwmodel")
-	})
-
-	t.Run("invalid debug status - enabled", func(t *testing.T) {
-		csToken := createProductionCsToken()
-		csToken.DbgStat = "enabled"
-		testValidation(t, verifier, csToken, true, "invalid dbgstat")
-	})
-
-	t.Run("invalid debug status - partially disabled", func(t *testing.T) {
-		csToken := createProductionCsToken()
-		csToken.DbgStat = "disabled"
-		testValidation(t, verifier, csToken, true, "invalid dbgstat")
-	})
-
-	t.Run("valid debug status - disabled-since-boot", func(t *testing.T) {
-		csToken := createProductionCsToken()
-		csToken.DbgStat = "disabled-since-boot"
-		testValidation(t, verifier, csToken, false, "")
-	})
-
-	t.Run("invalid software version - too low", func(t *testing.T) {
-		csToken := createProductionCsToken()
-		csToken.SwVersion = []string{"250299"}
-		testValidation(t, verifier, csToken, true, "invalid swversion")
-	})
-
-	t.Run("valid software version - at boundary", func(t *testing.T) {
-		csToken := createProductionCsToken()
-		csToken.SwVersion = []string{"250300"}
-		testValidation(t, verifier, csToken, false, "")
-	})
-
-	t.Run("valid software version - above boundary", func(t *testing.T) {
-		csToken := createProductionCsToken()
-		csToken.SwVersion = []string{"300000"}
-		testValidation(t, verifier, csToken, false, "")
-	})
-
-	t.Run("invalid support attributes", func(t *testing.T) {
-		csToken := createProductionCsToken()
+	t.Run("Google CS: invalid support attributes", func(t *testing.T) {
+		csToken := createProductionCsToken(GoogleConfidentialSpace)
 		csToken.SubMods.ConfidentialSpace.SupportAttributes = []string{"USABLE"}
-		testValidation(t, verifier, csToken, true, "invalid confidential_space.support_attributes")
+		testValidation(t, verifier, csToken, GoogleConfidentialSpace, true, "invalid confidential_space.support_attributes")
 	})
 
-	t.Run("invalid project ID", func(t *testing.T) {
-		csToken := createProductionCsToken()
-		csToken.SubMods.GCE.ProjectID = "wrong-project"
-		testValidation(t, verifier, csToken, true, "invalid project_id")
+	// Intel Trust Authority specific tests
+	t.Run("Intel: invalid TDX TCB status", func(t *testing.T) {
+		csToken := createProductionCsToken(IntelTrustAuthority)
+		csToken.TDXSubMods.GcpAttesterTcbStatus = "OutOfDate"
+		testValidation(t, verifier, csToken, IntelTrustAuthority, true, "invalid tdx.gcp_attester_tcb_status")
+	})
+
+	t.Run("Intel: missing TDX submods", func(t *testing.T) {
+		csToken := createProductionCsToken(IntelTrustAuthority)
+		csToken.TDXSubMods = TDXSubMods{}
+		testValidation(t, verifier, csToken, IntelTrustAuthority, true, "tdx submods not found")
+	})
+
+	t.Run("Intel: requires EXPERIMENTAL support attributes", func(t *testing.T) {
+		csToken := createProductionCsToken(IntelTrustAuthority)
+		csToken.SubMods.ConfidentialSpace.SupportAttributes = []string{"EXPERIMENTAL"}
+		testValidation(t, verifier, csToken, IntelTrustAuthority, false, "")
+	})
+
+	t.Run("Intel: rejects STABLE support attributes", func(t *testing.T) {
+		csToken := createProductionCsToken(IntelTrustAuthority)
+		csToken.SubMods.ConfidentialSpace.SupportAttributes = []string{"STABLE"}
+		testValidation(t, verifier, csToken, IntelTrustAuthority, true, "Expected to contain EXPERIMENTAL")
+	})
+
+	t.Run("Intel: rejects missing EXPERIMENTAL", func(t *testing.T) {
+		csToken := createProductionCsToken(IntelTrustAuthority)
+		csToken.SubMods.ConfidentialSpace.SupportAttributes = []string{"USABLE"}
+		testValidation(t, verifier, csToken, IntelTrustAuthority, true, "Expected to contain EXPERIMENTAL")
 	})
 
 	t.Run("debug token fails validation", func(t *testing.T) {
 		csToken := createDebugCsToken()
-		testValidation(t, verifier, csToken, true, "") // any error is acceptable
+		testValidation(t, verifier, csToken, GoogleConfidentialSpace, true, "") // any error is acceptable
 	})
 }
 
@@ -406,24 +493,25 @@ func TestDebugModeSkipsValidation(t *testing.T) {
 
 	// Create a verifier with debug mode enabled
 	verifier := &AttestationVerifier{
-		logger:    logger,
-		projectID: projectID,
-		jwksCache: nil,
-		debugMode: true,
+		logger:          logger,
+		projectID:       projectID,
+		googleJwksCache: nil,
+		intelJwksCache:  nil,
+		debugMode:       true,
 	}
 
 	t.Run("debug mode enabled - allows enabled debug status", func(t *testing.T) {
 		csToken := createDebugCsToken()
 		csToken.DbgStat = "enabled"
 		// Should NOT fail because debug mode is enabled
-		testValidation(t, verifier, csToken, false, "")
+		testValidation(t, verifier, csToken, GoogleConfidentialSpace, false, "")
 	})
 
 	t.Run("debug mode enabled - allows any debug status", func(t *testing.T) {
 		csToken := createDebugCsToken()
 		csToken.DbgStat = "some-random-status"
 		// Should NOT fail because debug mode is enabled
-		testValidation(t, verifier, csToken, false, "")
+		testValidation(t, verifier, csToken, GoogleConfidentialSpace, false, "")
 	})
 }
 
@@ -475,5 +563,94 @@ func TestInstanceNameParsing(t *testing.T) {
 				require.Equal(t, tc.expectedApp, appID)
 			}
 		})
+	}
+}
+
+func TestFilterIntelJWKS(t *testing.T) {
+	ctx := context.Background()
+	logger := setupLogger()
+
+	// Real Intel token with RS256 algorithm
+	realToken := "eyJhbGciOiJSUzI1NiIsImprdSI6Imh0dHBzOi8vcG9ydGFsLnRydXN0YXV0aG9yaXR5LmludGVsLmNvbS9jZXJ0cyIsImtpZCI6ImQxNTU0ZTBhYTJlOWViODZlNzdmNDFlMjQ3NTllNzcxMmVkNDI0YjM2NWZmMjBhMjJhZDFjMmUzYzdjNjA0NTVhYzY3YWU2YzJlN2IyNTZmN2I3NjgwMDlhYjg4MDgxYiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJFaWdlblggS01TIiwiZGJnc3RhdCI6ImRpc2FibGVkLXNpbmNlLWJvb3QiLCJlYXRfbm9uY2UiOlsiOWNjYjY1MmIzOTYzOWVkODE2Yzg4NjBiMzNlNDVmMmFiZjc4ODBlZWUyNWRiN2ZkMGUzYjZiZTc4ZGU1M2NiMyJdLCJlYXRfcHJvZmlsZSI6Imh0dHBzOi8vcG9ydGFsLnRydXN0YXV0aG9yaXR5LmludGVsLmNvbS9lYXRfcHJvZmlsZS5odG1sIiwiZ29vZ2xlX3NlcnZpY2VfYWNjb3VudHMiOlsidGVlLWluc3RhbmNlLXYyLXNlcG9saWEtZGV2QHRlZS1jb21wdXRlLXNlcG9saWEtZGV2LmlhbS5nc2VydmljZWFjY291bnQuY29tIl0sImh3bW9kZWwiOiJJTlRFTF9URFgiLCJvZW1pZCI6MTExMjksInNlY2Jvb3QiOnRydWUsInN1YiI6Imh0dHBzOi8vd3d3Lmdvb2dsZWFwaXMuY29tL2NvbXB1dGUvdjEvcHJvamVjdHMvdGVlLWNvbXB1dGUtc2Vwb2xpYS1kZXYvem9uZXMvdXMtZWFzdDEtYy9pbnN0YW5jZXMvdGVlLTB4ZTU3NzBiNmRlMmVjZTYxMDBmYzcxZTk0YmMzMzExMjY0NWY5MmVjYSIsInN1Ym1vZHMiOnsiY29uZmlkZW50aWFsX3NwYWNlIjp7Im1vbml0b3JpbmdfZW5hYmxlZCI6eyJtZW1vcnkiOmZhbHNlfSwic3VwcG9ydF9hdHRyaWJ1dGVzIjpbIkVYUEVSSU1FTlRBTCJdfSwiY29udGFpbmVyIjp7ImFyZ3MiOlsiL3Vzci9sb2NhbC9iaW4vY29tcHV0ZS1zb3VyY2UtZW52LnNoIiwibnBtIiwic3RhcnQiXSwiZW52Ijp7IkhPU1ROQU1FIjoidGVlLTB4ZTU3NzBiNmRlMmVjZTYxMDBmYzcxZTk0YmMzMzExMjY0NWY5MmVjYSIsIk5PREVfVkVSU0lPTiI6IjE4LjIwLjgiLCJQQVRIIjoiL3Vzci9sb2NhbC9zYmluOi91c3IvbG9jYWwvYmluOi91c3Ivc2JpbjovdXNyL2Jpbjovc2JpbjovYmluIiwiWUFSTl9WRVJTSU9OIjoiMS4yMi4yMiJ9LCJpbWFnZV9kaWdlc3QiOiJzaGEyNTY6MTg5MzBkMDU5YzI2YjRmNDkyOTBiYzA2ZjVjMzExZmQzMjNhMTExMzA0MjUxNDk2ZTE4MTcyYjMyOTA3ZjYyYSIsImltYWdlX2lkIjoic2hhMjU2OjJmYThmZWI1ODAxMGVlMmE4ZWIxN2RlNjBjZjhhMGE4Zjg0MjY0YzNiZmU0ZTQ1YjI4ZDNkNzlmZGNhZWY2NTgiLCJpbWFnZV9yZWZlcmVuY2UiOiJpbmRleC5kb2NrZXIuaW8vc2F1Y2Vsb3JkL215LXRzLWFwcEBzaGEyNTY6MTg5MzBkMDU5YzI2YjRmNDkyOTBiYzA2ZjVjMzExZmQzMjNhMTExMzA0MjUxNDk2ZTE4MTcyYjMyOTA3ZjYyYSIsInJlc3RhcnRfcG9saWN5IjoiTmV2ZXIifSwiZ2NlIjp7Imluc3RhbmNlX2lkIjoiNzAxNTIzMTk4MTgzNjcxNzIwNiIsImluc3RhbmNlX25hbWUiOiJ0ZWUtMHhlNTc3MGI2ZGUyZWNlNjEwMGZjNzFlOTRiYzMzMTEyNjQ1ZjkyZWNhIiwicHJvamVjdF9pZCI6InRlZS1jb21wdXRlLXNlcG9saWEtZGV2IiwicHJvamVjdF9udW1iZXIiOiI2MTcyMjc5MDM2NjgiLCJ6b25lIjoidXMtZWFzdDEtYyJ9fSwic3duYW1lIjoiQ09ORklERU5USUFMX1NQQUNFIiwic3d2ZXJzaW9uIjpbIjI1MDUwMSJdLCJ0ZHgiOnsiYXR0ZXN0ZXJfdGNiX2RhdGUiOiIyMDI1LTA1LTE0VDAwOjAwOjAwWiIsImF0dGVzdGVyX3RjYl9zdGF0dXMiOiJPdXRPZkRhdGUiLCJnY3BfYXR0ZXN0ZXJfdGNiX2RhdGUiOiIyMDI0LTAzLTEzVDAwOjAwOjAwWiIsImdjcF9hdHRlc3Rlcl90Y2Jfc3RhdHVzIjoiVXBUb0RhdGUifSwidmVyaWZpZXJfaW5zdGFuY2VfaWRzIjpbIjM2Nzc5ZjAyLWY4MDYtNDY2MS04ZmU5LTI2MDU4NjA4NWI3NiIsIjVjM2I5OTYzLTIzYmYtNGI1NS05YjEwLTJjMjNhZWU2OWVmMyIsIjAzNzY3ZWNkLTliNTMtNDEyNC05MGQ3LTkyMzg0MGRkOWNhNyIsIjE1OTVmNzhiLTBiYTgtNDc1Yi1iMWZlLTg1ZmNiOGYyZjkyZSIsIjRhZWMyNmVkLTQ0M2ItNDAyYS04YWY4LWFlYjlmYzYwYmE3ZiIsImMzY2I5MzM4LThkZTQtNDUwNS1iM2M4LWNjMTNkNGQyZDAwYSIsIjE2MmMxNzE0LTY3Y2YtNDU3Yi05M2RmLWJiNWY4NTcxNjBlMCJdLCJleHAiOjE3NjEzNDI0MzAsImp0aSI6IjY0YWVhYmQ3LTlmOTctNGFjZS05MGZmLTBmMTU1OWI4OGNjZCIsImlhdCI6MTc2MTM0MjEzMCwiaXNzIjoiaHR0cHM6Ly9wb3J0YWwudHJ1c3RhdXRob3JpdHkuaW50ZWwuY29tIiwibmJmIjoxNzYxMzQyMTMwfQ.WwPSo7PkiKCNB5QeeQVP3c09b6054JLnXKCB4OpNKWqd-MJ_hwFHMQDRQcnD8urY6rlpNx9lAPjEJL66qGQY7GiSmPUWQ-xYKeX8wQYPVzhTxbC-2ckHeHaYOBPneI3ct1ryWvd_GTRJenM1CeDDAfhDz9xFNfqJYQZ2bY55Nf853TUjXFATKONutRRTVvxgx0b75wDz-PQcMSFAy73-AxnHJVEFqxqh1v3no5jsvAES7nxaFguHdxwB9Kuprs9UMklMsM8xXE3Gww_lYoPxjDYwG5aAmui9bOROGnUmPDPIazMWX5L2HDdXOyvt9iS9DXKk-R1DlsytG_SmpwpU3A6Abfjj7-fyOnYeXeDRebO9iNKzcBZN_w084XxtdFKyoPXynvJMCWMh0pcgByVHtyOXBd1BQ0yMRJ91cqmNLYcvlt-Qr9NzXxVzA3qHtDBTswbbwelnx6vETyzSTOhjfXuf7oCJqgfRVKdRYfTS9pFbaQo2Tjg_1Xdi15tDFbOf"
+
+	// Fetch the real Intel JWKS
+	t.Logf("Fetching Intel JWKS from: %s", intelTrustAuthorityJWKURL)
+	intelKeySet, err := NewJWKCache(ctx, intelTrustAuthorityJWKURL, time.Minute)
+	require.NoError(t, err, "Failed to create Intel JWKS cache")
+
+	originalCount := intelKeySet.Len()
+	t.Logf("Original Intel JWKS has %d keys", originalCount)
+	require.Equal(t, 2, originalCount, "Intel JWKS should have 2 keys (both with same kid but different algorithms)")
+
+	// Filter the JWKS using the real token
+	filteredKeySet, err := getFilteredKeySetForToken(realToken, intelKeySet, logger)
+	require.NoError(t, err, "Failed to filter key set")
+
+	filteredCount := filteredKeySet.Len()
+	t.Logf("Filtered JWKS has %d keys", filteredCount)
+	require.Equal(t, 1, filteredCount, "Filtered JWKS should have exactly 1 key (RS256 only)")
+
+	// Verify the filtered key has the correct algorithm
+	key, ok := filteredKeySet.Key(0)
+	require.True(t, ok, "Should be able to get the first key from filtered set")
+
+	keyAlg, ok := key.Algorithm()
+	require.True(t, ok, "Key should have an algorithm")
+	require.Equal(t, "RS256", keyAlg.String(), "Filtered key should be RS256")
+}
+
+func TestNonceDecoding(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	// Setup JWKS once for all test cases
+	keySet, privateKey, keyID := createTestJWKS(t)
+
+	// Test both Google and Intel providers
+	providers := []AttestationProvider{GoogleConfidentialSpace, IntelTrustAuthority}
+
+	testCases := []struct {
+		name          string
+		nonce         string
+		expectedNonce string
+	}{
+		{
+			name:          "with nonce",
+			nonce:         "abc123",
+			expectedNonce: "abc123",
+		},
+		{
+			name:          "empty nonce",
+			nonce:         "",
+			expectedNonce: "",
+		},
+	}
+
+	for _, provider := range providers {
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				// Create token with nonce
+				csToken := createProductionCsToken(provider)
+				csToken.EatNonce = tc.nonce
+
+				// Create and sign JWT token using helper
+				signedToken := createdSignedJWT(t, privateKey, keyID, csToken)
+
+				// Create verifier with mock key set
+				verifier := &AttestationVerifier{
+					logger:          logger,
+					projectID:       "tee-compute-sepolia-prod",
+					googleJwksCache: keySet,
+					intelJwksCache:  keySet, // Use same mock JWKS for both providers in tests
+					debugMode:       true,   // Use debug mode to skip strict validation
+				}
+
+				// Verify and extract nonce
+				claims, err := verifier.VerifyAttestation(ctx, signedToken, provider)
+				require.NoError(t, err)
+				require.NotNil(t, claims)
+				require.Equal(t, tc.expectedNonce, claims.Nonce)
+			})
+		}
 	}
 }

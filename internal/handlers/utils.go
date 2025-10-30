@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,6 +13,23 @@ import (
 )
 
 const timeout = 10 * time.Second
+
+// httpError wraps an error with an HTTP status code
+type httpError struct {
+	statusCode int
+	message    string
+}
+
+func (e *httpError) Error() string {
+	return e.message
+}
+
+func newHTTPError(statusCode int, format string, args ...interface{}) *httpError {
+	return &httpError{
+		statusCode: statusCode,
+		message:    fmt.Sprintf(format, args...),
+	}
+}
 
 func returnSuccessWithSignature[T any](c echo.Context, logger *slog.Logger, kmsClient kms.KMSClient, status int, data T) error {
 	responseJSON, err := json.Marshal(data)
@@ -35,5 +51,5 @@ func returnSuccessWithSignature[T any](c echo.Context, logger *slog.Logger, kmsC
 func returnError(c echo.Context, logger *slog.Logger, status int, errString string) error {
 	logger.Error(errString)
 	c.JSON(status, map[string]string{"error": errString})
-	return errors.New(errString)
+	return nil
 }

@@ -17,7 +17,11 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwe"
 )
 
-const JWEAppIDHeader = "x-eigenx-app-id"
+var (
+	KMSSignatureHeader     = []byte("COMPUTE_APP_KMS_SIGNATURE_V1")
+	EnvRequestRSAKeyHeader = []byte("COMPUTE_APP_ENV_REQUEST_RSA_KEY_V1")
+	JWEAppIDHeader         = "x-eigenx-app-id"
+)
 
 // GenerateRSAKeyPair generates a 4096-bit RSA private key and public key
 func GenerateRSAKeyPair() ([]byte, []byte, error) {
@@ -156,12 +160,9 @@ func parseRSAKey(publicKeyPEM []byte) (*rsa.PublicKey, error) {
 	return rsaPubKey, nil
 }
 
-func CalculateKMSSignableDigest(data []byte) []byte {
-	// add a domain separator to prevent cross-contamination
-	domainSeparator := []byte("COMPUTE_APP_KMS_SIGNATURE_V1")
-
+func CalculateSignableDigest(header, data []byte) []byte {
 	digest := sha256.New()
-	digest.Write(domainSeparator)
+	digest.Write(header)
 	digest.Write([]byte{0x00}) // separator
 	digest.Write(data)
 
@@ -197,7 +198,7 @@ func VerifyKMSSignature[T any](signedResponse types.SignedResponse[T], publicKey
 	if err != nil {
 		return false, fmt.Errorf("failed to marshal env: %w", err)
 	}
-	digest := CalculateKMSSignableDigest(envJSON)
+	digest := CalculateSignableDigest(KMSSignatureHeader, envJSON)
 	if !ecdsa.Verify(ecKey, digest[:], parsedSig.R, parsedSig.S) {
 		return false, nil // Invalid signature, but no error
 	}

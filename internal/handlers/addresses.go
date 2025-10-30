@@ -18,28 +18,12 @@ import (
 
 const maxAddresses = 100
 
-// HandleAddresses godoc
-//
-//	@Summary		Get EVM addresses
-//	@Description	Derive EVM addresses from app's HD wallet
-//	@Tags			addresses
-//	@Accept			json
-//	@Produce		json
-//	@Param			appID	query		string	true	"Application ID"
-//	@Param			count	query		int		false	"Number of addresses to derive (default: 1, max: 100)"
-//	@Success		200		{object}	types.SignedResponse[types.AddressesResponse]
-//	@Failure		400		{object}	map[string]string
-//	@Failure		500		{object}	map[string]string
-//	@Router			/addresses [get]
-func HandleAddresses(c echo.Context, logger *slog.Logger, kmsClient kms.KMSClient) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
+// deriveAddressesFromRequest is a helper function that extracts common logic for deriving addresses
+func deriveAddressesFromRequest(c echo.Context, ctx context.Context, logger *slog.Logger, kmsClient kms.KMSClient) (string, []types.EVMAddressAndDerivationPath, []types.SolanaAddressAndDerivationPath, error) {
 	// Get appId from query parameter
 	appID := strings.ToLower(c.QueryParam("appID"))
 	if appID == "" {
-		returnError(c, logger, http.StatusBadRequest, "appID query parameter is required")
-		return nil
+		return "", nil, nil, newHTTPError(http.StatusBadRequest, "appID query parameter is required")
 	}
 
 	// Get number of addresses to derive (default to 1)
@@ -49,12 +33,10 @@ func HandleAddresses(c echo.Context, logger *slog.Logger, kmsClient kms.KMSClien
 	}
 	count, err := strconv.Atoi(countParam)
 	if err != nil {
-		returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("Invalid count parameter: %v", err))
-		return nil
+		return "", nil, nil, newHTTPError(http.StatusBadRequest, "Invalid count parameter: %v", err)
 	}
 	if count <= 0 || count > maxAddresses {
-		returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("Invalid count parameter: %d", count))
-		return nil
+		return "", nil, nil, newHTTPError(http.StatusBadRequest, "Invalid count parameter: %d", count)
 	}
 
 	logger.Debug("Processing addresses request", "app_id", appID, "count", count)
@@ -62,8 +44,7 @@ func HandleAddresses(c echo.Context, logger *slog.Logger, kmsClient kms.KMSClien
 	// Get or generate app mnemonic (KMS encrypted)
 	mnemonic, err := kmsClient.DeriveMnemonic(ctx, appID)
 	if err != nil {
-		returnError(c, logger, http.StatusInternalServerError, fmt.Sprintf("Failed to get/generate mnemonic: %v", err))
-		return nil
+		return "", nil, nil, newHTTPError(http.StatusInternalServerError, "Failed to get/generate mnemonic: %v", err)
 	}
 
 	logger.Debug("Retrieved/generated mnemonic", "app_id", appID)
@@ -71,8 +52,7 @@ func HandleAddresses(c echo.Context, logger *slog.Logger, kmsClient kms.KMSClien
 	// Derive addresses from mnemonic
 	evmWallet, err := hdwallet.NewFromMnemonic(mnemonic)
 	if err != nil {
-		returnError(c, logger, http.StatusInternalServerError, fmt.Sprintf("Failed to create EVM wallet from mnemonic: %v", err))
-		return nil
+		return "", nil, nil, newHTTPError(http.StatusInternalServerError, "Failed to create EVM wallet from mnemonic: %v", err)
 	}
 
 	evmAddresses := make([]types.EVMAddressAndDerivationPath, count)
@@ -82,14 +62,12 @@ func HandleAddresses(c echo.Context, logger *slog.Logger, kmsClient kms.KMSClien
 		hdpath := hdwallet.MustParseDerivationPath(evmPath)
 		evmAccount, err := evmWallet.Derive(hdpath, false)
 		if err != nil {
-			returnError(c, logger, http.StatusInternalServerError, fmt.Sprintf("Failed to derive EVM address at index %d: %v", i, err))
-			return nil
+			return "", nil, nil, newHTTPError(http.StatusInternalServerError, "Failed to derive EVM address at index %d: %v", i, err)
 		}
 		solanaPath := fmt.Sprintf("m/44'/501'/%d'/0'", i)
 		solanaWallet, err := crypto.GenerateSolanaWalletFromMnemonicSeed(mnemonic, uint32(i))
 		if err != nil {
-			returnError(c, logger, http.StatusInternalServerError, fmt.Sprintf("Failed to derive Solana address at index %d: %v", i, err))
-			return nil
+			return "", nil, nil, newHTTPError(http.StatusInternalServerError, "Failed to derive Solana address at index %d: %v", i, err)
 		}
 
 		evmAddresses[i] = types.EVMAddressAndDerivationPath{
@@ -103,14 +81,80 @@ func HandleAddresses(c echo.Context, logger *slog.Logger, kmsClient kms.KMSClien
 	}
 
 	logger.Debug("Derived addresses", "app_id", appID, "count", count)
+	return appID, evmAddresses, solanaAddresses, nil
+}
 
-	// Create response
-	response := types.AddressesResponse{
+// HandleAddresses godoc
+//
+//	@Summary		Get EVM addresses
+//	@Description	Derive EVM addresses from app's HD wallet
+//	@Tags			addresses
+//	@Accept			json
+//	@Produce		json
+//	@Param			appID	query		string	true	"Application ID"
+//	@Param			count	query		int		false	"Number of addresses to derive (default: 1, max: 100)"
+//	@Success		200		{object}	types.SignedResponse[types.AddressesResponseV1]
+//	@Failure		400		{object}	map[string]string
+//	@Failure		500		{object}	map[string]string
+//	@Router			/addresses [get]
+func HandleAddresses(c echo.Context, logger *slog.Logger, kmsClient kms.KMSClient) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	appID, evmAddresses, solanaAddresses, err := deriveAddressesFromRequest(c, ctx, logger, kmsClient)
+	if err != nil {
+		if httpErr, ok := err.(*httpError); ok {
+			returnError(c, logger, httpErr.statusCode, httpErr.message)
+		} else {
+			returnError(c, logger, http.StatusInternalServerError, err.Error())
+		}
+		return nil
+	}
+
+	// Create response (V1 - without appId)
+	response := types.AddressesResponseV1{
 		EVMAddresses:    evmAddresses,
 		SolanaAddresses: solanaAddresses,
 	}
 
 	logger.Debug("Returning response", "app_id", appID)
-	returnSuccessWithSignature(c, logger, kmsClient, http.StatusOK, response)
-	return nil
+	return returnSuccessWithSignature(c, logger, kmsClient, http.StatusOK, response)
+}
+
+// HandleAddressesV2 godoc
+//
+//	@Summary		Get EVM addresses (V2)
+//	@Description	Derive EVM addresses from app's HD wallet, includes appId in response
+//	@Tags			addresses
+//	@Accept			json
+//	@Produce		json
+//	@Param			appID	query		string	true	"Application ID"
+//	@Param			count	query		int		false	"Number of addresses to derive (default: 1, max: 100)"
+//	@Success		200		{object}	types.SignedResponse[types.AddressesResponseV2]
+//	@Failure		400		{object}	map[string]string
+//	@Failure		500		{object}	map[string]string
+//	@Router			/addresses/v2 [get]
+func HandleAddressesV2(c echo.Context, logger *slog.Logger, kmsClient kms.KMSClient) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	appID, evmAddresses, solanaAddresses, err := deriveAddressesFromRequest(c, ctx, logger, kmsClient)
+	if err != nil {
+		if httpErr, ok := err.(*httpError); ok {
+			returnError(c, logger, httpErr.statusCode, httpErr.message)
+		} else {
+			returnError(c, logger, http.StatusInternalServerError, err.Error())
+		}
+		return nil
+	}
+
+	// Create response (V2 - with appId)
+	response := types.AddressesResponseV2{
+		AppID:           appID,
+		EVMAddresses:    evmAddresses,
+		SolanaAddresses: solanaAddresses,
+	}
+
+	logger.Debug("Returning response", "app_id", appID)
+	return returnSuccessWithSignature(c, logger, kmsClient, http.StatusOK, response)
 }

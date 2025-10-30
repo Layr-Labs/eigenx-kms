@@ -42,16 +42,16 @@ func (m *MockAttestationVerifierInterface) EXPECT() *MockAttestationVerifierInte
 }
 
 // VerifyAttestation mocks base method.
-func (m *MockAttestationVerifierInterface) VerifyAttestation(ctx context.Context, tokenString string) (*attestation.AttestationClaims, error) {
+func (m *MockAttestationVerifierInterface) VerifyAttestation(ctx context.Context, tokenString string, provider attestation.AttestationProvider) (*attestation.AttestationClaims, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "VerifyAttestation", ctx, tokenString)
+	ret := m.ctrl.Call(m, "VerifyAttestation", ctx, tokenString, provider)
 	ret0, _ := ret[0].(*attestation.AttestationClaims)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // VerifyAttestation indicates an expected call of VerifyAttestation.
-func (mr *MockAttestationVerifierInterfaceMockRecorder) VerifyAttestation(ctx, tokenString any) *gomock.Call {
+func (mr *MockAttestationVerifierInterfaceMockRecorder) VerifyAttestation(ctx, tokenString, provider any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VerifyAttestation", reflect.TypeOf((*MockAttestationVerifierInterface)(nil).VerifyAttestation), ctx, tokenString)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VerifyAttestation", reflect.TypeOf((*MockAttestationVerifierInterface)(nil).VerifyAttestation), ctx, tokenString, provider)
 }

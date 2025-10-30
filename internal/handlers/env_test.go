@@ -2,11 +2,14 @@ package handlers
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,10 +17,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Layr-Labs/eigenx-kms/internal/kms"
 	"github.com/Layr-Labs/eigenx-kms/internal/kms/fakes"
 	"github.com/Layr-Labs/eigenx-kms/internal/kms/mocks"
 	"github.com/Layr-Labs/eigenx-kms/pkg/attestation"
 	attestationMocks "github.com/Layr-Labs/eigenx-kms/pkg/attestation/mocks"
+	"github.com/Layr-Labs/eigenx-kms/pkg/chainclient"
 	chainClientMocks "github.com/Layr-Labs/eigenx-kms/pkg/chainclient/mocks"
 	"github.com/Layr-Labs/eigenx-kms/pkg/crypto"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
@@ -68,17 +73,66 @@ func setupEchoContextWithBodyAndQuery(method, path string, body []byte, queryPar
 	return e.NewContext(req, rec), rec
 }
 
-// testSetup encapsulates common test setup for HandleEnv tests
-type testSetup struct {
+// envTestSetup encapsulates common test setup for both HandleEnv and HandleEnvV2 tests
+type envTestSetup struct {
 	FakeKMS             *fakes.FakeKMS
 	MockAttestation     *attestationMocks.MockAttestationVerifierInterface
 	MockChainClient     *chainClientMocks.MockChainClient
-	EnvRequest          types.EnvRequest
 	ClientRSAPrivatePEM []byte
+	ClientRSAPublicPEM  []byte
+	MockJWT             string
+	// V1 specific
+	EnvRequestV1 types.EnvRequestV1
+	// V2 specific
+	EnvRequestV2 types.EnvRequestV2
+}
+
+// testConfig represents a test configuration for V1 or V2
+type testConfig struct {
+	name             string
+	endpoint         string
+	handler          func(c echo.Context, logger *slog.Logger, attestationVerifier attestation.AttestationVerifierInterface, chainClient chainclient.ChainClient, kmsClient kms.KMSClient, debugMode bool) error
+	setupFunc        func(t *testing.T) *envTestSetup
+	getRequestBody   func(setup *envTestSetup) []byte
+	setupAttestation func(setup *envTestSetup, claims *attestation.AttestationClaims)
+	provider         attestation.AttestationProvider // Provider to use for attestation verification
+}
+
+// testConfigs defines both V1 and V2 configurations
+var testConfigs = []testConfig{
+	{
+		name:      "V1",
+		endpoint:  "/env",
+		handler:   HandleEnv,
+		setupFunc: setupHandleEnvTest,
+		provider:  attestation.GoogleConfidentialSpace,
+		getRequestBody: func(setup *envTestSetup) []byte {
+			body, _ := json.Marshal(setup.EnvRequestV1)
+			return body
+		},
+		setupAttestation: func(setup *envTestSetup, claims *attestation.AttestationClaims) {
+			// V1 doesn't use nonces
+		},
+	},
+	{
+		name:      "V2",
+		endpoint:  "/env/v2",
+		handler:   HandleEnvV2,
+		setupFunc: setupHandleEnvV2Test,
+		provider:  attestation.IntelTrustAuthority,
+		getRequestBody: func(setup *envTestSetup) []byte {
+			body, _ := json.Marshal(setup.EnvRequestV2)
+			return body
+		},
+		setupAttestation: func(setup *envTestSetup, claims *attestation.AttestationClaims) {
+			// V2 needs RSA key hash in nonce
+			claims.Nonce = setup.getRSAKeyHash()
+		},
+	},
 }
 
 // setupHandleEnvTest creates a common test setup with mocks and fake KMS
-func setupHandleEnvTest(t *testing.T) *testSetup {
+func setupHandleEnvTest(t *testing.T) *envTestSetup {
 	ctrl := gomock.NewController(t)
 	t.Cleanup(ctrl.Finish)
 
@@ -90,20 +144,56 @@ func setupHandleEnvTest(t *testing.T) *testSetup {
 
 	// Create valid encrypted request with fake JWT
 	mockJWT := `{"sub":"test-app","iat":1234567890}`
-	envRequest, clientRSAPrivatePEM, err := fakeKMS.CreateValidEncryptedRequest(mockJWT)
+	envRequestV1, clientRSAPrivatePEM, err := fakeKMS.CreateValidEncryptedRequestV1(mockJWT)
 	require.NoError(t, err)
 
-	return &testSetup{
+	return &envTestSetup{
 		FakeKMS:             fakeKMS,
 		MockAttestation:     mockAttestation,
 		MockChainClient:     mockChainClient,
-		EnvRequest:          envRequest,
+		EnvRequestV1:        envRequestV1,
 		ClientRSAPrivatePEM: clientRSAPrivatePEM,
+		MockJWT:             mockJWT,
+	}
+}
+
+// setupHandleEnvV2Test creates a common test setup with mocks and fake KMS for V2
+func setupHandleEnvV2Test(t *testing.T) *envTestSetup {
+	ctrl := gomock.NewController(t)
+	t.Cleanup(ctrl.Finish)
+
+	fakeKMS, err := createFakeKMS(t)
+	require.NoError(t, err)
+
+	mockAttestation := attestationMocks.NewMockAttestationVerifierInterface(ctrl)
+	mockChainClient := chainClientMocks.NewMockChainClient(ctrl)
+
+	// Generate RSA key pair for V2 request
+	clientRSAPrivatePEM, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	// Create mock JWT
+	mockJWT := `{"sub":"test-app","iat":1234567890}`
+
+	// Create EnvRequestV2 with JWT and RSA public key
+	envRequestV2 := types.EnvRequestV2{
+		JWTWithAttestedRSAKey: mockJWT,
+		RSAKeyPEM:             string(clientRSAPublicPEM),
+	}
+
+	return &envTestSetup{
+		FakeKMS:             fakeKMS,
+		MockAttestation:     mockAttestation,
+		MockChainClient:     mockChainClient,
+		EnvRequestV2:        envRequestV2,
+		ClientRSAPrivatePEM: clientRSAPrivatePEM,
+		ClientRSAPublicPEM:  clientRSAPublicPEM,
+		MockJWT:             mockJWT,
 	}
 }
 
 // setupSuccessfulChainClient configures the chain client mock for successful responses
-func (ts *testSetup) setupSuccessfulChainClient(t *testing.T, appID string, privateEnvData types.Env) {
+func (ts *envTestSetup) setupSuccessfulChainClient(t *testing.T, appID string, privateEnvData types.Env) {
 	hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
 	require.NoError(t, err)
 	var expectedDigest [32]byte
@@ -123,9 +213,15 @@ func (ts *testSetup) setupSuccessfulChainClient(t *testing.T, appID string, priv
 		Return(expectedDigest, publicEnv, []byte(encryptedPrivateEnv), nil)
 }
 
+// getRSAKeyHash calculates the hash of the RSA public key for attestation
+func (ts *envTestSetup) getRSAKeyHash() string {
+	hashBytes := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, ts.ClientRSAPublicPEM)
+	return hex.EncodeToString(hashBytes)
+}
+
 // verifyEnvironmentResponse decrypts and verifies the environment variables in the response
-func (ts *testSetup) verifyEnvironmentResponse(t *testing.T, rec *httptest.ResponseRecorder, expectedPrivateEnv types.Env) {
-	var signedResponse types.SignedResponse[types.EnvResponse]
+func (ts *envTestSetup) verifyEnvironmentResponse(t *testing.T, rec *httptest.ResponseRecorder, expectedPrivateEnv types.Env) {
+	var signedResponse types.SignedResponse[types.EnvResponseV1]
 	err := json.Unmarshal(rec.Body.Bytes(), &signedResponse)
 	require.NoError(t, err)
 
@@ -150,56 +246,63 @@ func (ts *testSetup) verifyEnvironmentResponse(t *testing.T, rec *httptest.Respo
 	require.Equal(t, testEnvMnemonic, returnedEnv["MNEMONIC"])
 }
 
+// requireErrorResponse unmarshals the response body and checks that the error message contains the expected string(s)
+func requireErrorResponse(t *testing.T, rec *httptest.ResponseRecorder, expectedError string) {
+	var response map[string]string
+	err := json.Unmarshal(rec.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Contains(t, response["error"], expectedError)
+}
+
 func TestHandleEnv_InputValidation(t *testing.T) {
 	logger := setupEnvLogger()
 
-	t.Run("invalid JSON in request body", func(t *testing.T) {
+	t.Run("invalid JSON in request body v1", func(t *testing.T) {
 		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", []byte("{invalid json}"))
 
 		err := HandleEnv(c, logger, nil, nil, nil, false)
 
-		require.Error(t, err)
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, err.Error(), "Failed to parse env request")
-
-		var response map[string]string
-		err = json.Unmarshal(rec.Body.Bytes(), &response)
 		require.NoError(t, err)
-		require.Contains(t, response["error"], "Failed to parse env request")
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+
+		requireErrorResponse(t, rec, "Failed to parse env request")
+	})
+
+	t.Run("invalid JSON in request body v2", func(t *testing.T) {
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v2", []byte("{invalid json}"))
+
+		err := HandleEnvV2(c, logger, nil, nil, nil, false)
+
+		require.NoError(t, err)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+
+		requireErrorResponse(t, rec, "Failed to parse env request")
 	})
 
 	t.Run("empty encryptedJwtWithRsaKey field", func(t *testing.T) {
-		envRequest := types.EnvRequest{EncryptedJWTWithRSAKey: ""}
+		envRequest := types.EnvRequestV1{EncryptedJWTWithRSAKey: ""}
 		requestBody, _ := json.Marshal(envRequest)
 		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
 
 		err := HandleEnv(c, logger, nil, nil, nil, false)
 
-		require.Error(t, err)
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, err.Error(), "Failed to decrypt encrypted request body")
-
-		var response map[string]string
-		err = json.Unmarshal(rec.Body.Bytes(), &response)
 		require.NoError(t, err)
-		require.Contains(t, response["error"], "Failed to decrypt encrypted request body")
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+
+		requireErrorResponse(t, rec, "Failed to decrypt encrypted request body")
 	})
 
 	t.Run("invalid encrypted data format", func(t *testing.T) {
-		envRequest := types.EnvRequest{EncryptedJWTWithRSAKey: "invalid-jwe-format"}
+		envRequest := types.EnvRequestV1{EncryptedJWTWithRSAKey: "invalid-jwe-format"}
 		requestBody, _ := json.Marshal(envRequest)
 		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
 
 		err := HandleEnv(c, logger, nil, nil, nil, false)
 
-		require.Error(t, err)
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, err.Error(), "Failed to decrypt encrypted request body")
-
-		var response map[string]string
-		err = json.Unmarshal(rec.Body.Bytes(), &response)
 		require.NoError(t, err)
-		require.Contains(t, response["error"], "Failed to decrypt encrypted request body")
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+
+		requireErrorResponse(t, rec, "Failed to decrypt encrypted request body")
 	})
 }
 
@@ -268,7 +371,7 @@ func TestHandleEnv_KMSErrorScenarios(t *testing.T) {
 			DecryptKey(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Return(nil, errors.New("KMS decryption failed"))
 
-		envRequest := types.EnvRequest{
+		envRequest := types.EnvRequestV1{
 			EncryptedJWTWithRSAKey: "eyJhbGciOiJSU0EtT0FFUC0yNTYiLCJlbmMiOiJBMjU2R0NNIn0.dGVzdA.dGVzdA.dGVzdA.dGVzdA",
 		}
 		requestBody, _ := json.Marshal(envRequest)
@@ -276,9 +379,10 @@ func TestHandleEnv_KMSErrorScenarios(t *testing.T) {
 
 		err := HandleEnv(c, logger, mockAttestation, mockChainClient, mockKMS, false)
 
-		require.Error(t, err)
+		require.NoError(t, err)
 		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, err.Error(), "Failed to decrypt encrypted request body")
+
+		requireErrorResponse(t, rec, "Failed to decrypt encrypted request body")
 	})
 
 }
@@ -286,372 +390,603 @@ func TestHandleEnv_KMSErrorScenarios(t *testing.T) {
 func TestHandleEnv_ValidRequestsWithFakeKMS(t *testing.T) {
 	logger := setupEnvLogger()
 
-	t.Run("Valid request with attestation failure", func(t *testing.T) {
-		setup := setupHandleEnvTest(t)
+	for _, tc := range testConfigs {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Run("Valid request with attestation failure", func(t *testing.T) {
+				setup := tc.setupFunc(t)
 
-		// Mock attestation to fail
-		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
-			Return(nil, errors.New("attestation verification failed"))
+				// Mock attestation to fail
+				// V1 only accepts Google CS, V2 only accepts Intel
+				setup.MockAttestation.EXPECT().
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
+					Return(nil, errors.New("attestation verification failed"))
 
-		requestBody, _ := json.Marshal(setup.EnvRequest)
-		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
+				requestBody := tc.getRequestBody(setup)
+				c, rec := setupEchoContextWithBody(http.MethodPost, tc.endpoint, requestBody)
 
-		err := HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+				err := tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-		require.Error(t, err)
-		require.Equal(t, http.StatusUnauthorized, rec.Code)
-		require.Contains(t, err.Error(), "Attestation verification failed")
+				require.NoError(t, err)
+				require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+				requireErrorResponse(t, rec, "Attestation verification failed")
+			})
+
+			t.Run("Valid request with attestation success but authorization failure", func(t *testing.T) {
+				setup := tc.setupFunc(t)
+
+				// Mock attestation to succeed with wrong digest
+				claims := &attestation.AttestationClaims{
+					ImageDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					AppID:       testEnvAppID,
+				}
+				tc.setupAttestation(setup, claims)
+
+				setup.MockAttestation.EXPECT().
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
+					Return(claims, nil)
+
+				// Mock ChainClient to return different digest (causing authorization failure)
+				hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
+				require.NoError(t, err)
+				var expectedDigest [32]byte
+				copy(expectedDigest[:], hexDigest)
+				setup.MockChainClient.EXPECT().
+					GetLatestRelease(gomock.Any(), gomock.Any()).
+					Return(expectedDigest, types.Env{}, []byte(""), nil)
+
+				requestBody := tc.getRequestBody(setup)
+				c, rec := setupEchoContextWithBody(http.MethodPost, tc.endpoint, requestBody)
+
+				err = tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+				require.NoError(t, err)
+				require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+				requireErrorResponse(t, rec, "Authorization failed")
+			})
+
+			t.Run("Valid request with full success path", func(t *testing.T) {
+				setup := tc.setupFunc(t)
+
+				// Mock attestation to succeed with correct digest
+				claims := &attestation.AttestationClaims{
+					ImageDigest: testValidDigest,
+					AppID:       testEnvAppID,
+				}
+				tc.setupAttestation(setup, claims)
+
+				setup.MockAttestation.EXPECT().
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
+					Return(claims, nil)
+
+				// Setup successful chain client response
+				privateEnv := types.Env{"SECRET_KEY": "secret_value", "DATABASE_URL": "postgres://test:test@localhost/db"}
+				setup.setupSuccessfulChainClient(t, testEnvAppID, privateEnv)
+
+				requestBody := tc.getRequestBody(setup)
+				c, rec := setupEchoContextWithBody(http.MethodPost, tc.endpoint, requestBody)
+
+				err := tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, rec.Code)
+
+				// Verify the response content
+				setup.verifyEnvironmentResponse(t, rec, privateEnv)
+			})
+		})
+	}
+}
+
+func TestHandleEnv_V1_InvalidRSAKeySize(t *testing.T) {
+	logger := setupEnvLogger()
+
+	fakeKMS, err := createFakeKMS(t)
+	require.NoError(t, err)
+
+	// Create encrypted request with smaller RSA key (2048-bit instead of 4096-bit)
+	mockJWT := `{"sub":"test-app","iat":1234567890}`
+	envRequest, err := fakeKMS.CreateInvalidKeyEncryptedRequestV1(mockJWT, 2048)
+	require.NoError(t, err)
+
+	requestBody, _ := json.Marshal(envRequest)
+	c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
+
+	// No mocks needed since validation happens before attestation/chainclient calls
+	err = HandleEnv(c, logger, nil, nil, fakeKMS, false)
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	requireErrorResponse(t, rec, "encryption key size mismatch")
+}
+
+func TestHandleEnvV2_InvalidRSAKeySize(t *testing.T) {
+	logger := setupEnvLogger()
+
+	// Generate a 2048-bit RSA key (invalid, should be 4096)
+	smallPrivateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	smallPublicKeyBytes, err := x509.MarshalPKIXPublicKey(&smallPrivateKey.PublicKey)
+	require.NoError(t, err)
+
+	smallPublicKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: smallPublicKeyBytes,
 	})
 
-	t.Run("Valid request with attestation success but authorization failure", func(t *testing.T) {
-		setup := setupHandleEnvTest(t)
+	envRequest := types.EnvRequestV2{
+		JWTWithAttestedRSAKey: "mock-jwt",
+		RSAKeyPEM:             string(smallPublicKeyPEM),
+	}
 
-		// Mock attestation to succeed with wrong digest
-		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
-			Return(&attestation.AttestationClaims{
-				ImageDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-				AppID:       testEnvAppID,
-			}, nil)
+	requestBody, _ := json.Marshal(envRequest)
+	c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v2", requestBody)
 
-		// Mock ChainClient to return different digest (causing authorization failure)
-		hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
-		require.NoError(t, err)
-		var expectedDigest [32]byte
-		copy(expectedDigest[:], hexDigest)
-		setup.MockChainClient.EXPECT().
-			GetLatestRelease(gomock.Any(), gomock.Any()).
-			Return(expectedDigest, types.Env{}, []byte(""), nil)
+	err = HandleEnvV2(c, logger, nil, nil, nil, false)
 
-		requestBody, _ := json.Marshal(setup.EnvRequest)
-		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
-
-		err = HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
-
-		require.Error(t, err)
-		require.Equal(t, http.StatusUnauthorized, rec.Code)
-		require.Contains(t, err.Error(), "Authorization failed")
-	})
-
-	t.Run("Invalid RSA key size should fail", func(t *testing.T) {
-		fakeKMS, err := createFakeKMS(t)
-		require.NoError(t, err)
-
-		// Create encrypted request with smaller RSA key (2048-bit instead of 4096-bit)
-		mockJWT := `{"sub":"test-app","iat":1234567890}`
-		envRequest, err := fakeKMS.CreateInvalidKeyEncryptedRequest(mockJWT, 2048)
-		require.NoError(t, err)
-
-		requestBody, _ := json.Marshal(envRequest)
-		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
-
-		// No mocks needed since validation happens before attestation/chainclient calls
-		err = HandleEnv(c, logger, nil, nil, fakeKMS, false)
-
-		require.Error(t, err)
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, err.Error(), "encryption key size mismatch")
-		require.Contains(t, err.Error(), "RSA key must be 4096 bits, got 2048 bits")
-	})
-
-	t.Run("Valid request with full success path", func(t *testing.T) {
-		setup := setupHandleEnvTest(t)
-
-		// Mock attestation to succeed with correct digest
-		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
-			Return(&attestation.AttestationClaims{
-				ImageDigest: testValidDigest,
-				AppID:       testEnvAppID,
-			}, nil)
-
-		// Setup successful chain client response
-		privateEnv := types.Env{"SECRET_KEY": "secret_value", "DATABASE_URL": "postgres://test:test@localhost/db"}
-		setup.setupSuccessfulChainClient(t, testEnvAppID, privateEnv)
-
-		requestBody, _ := json.Marshal(setup.EnvRequest)
-		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
-
-		err := HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
-
-		require.NoError(t, err)
-		require.Equal(t, http.StatusOK, rec.Code)
-
-		// Verify the response content
-		setup.verifyEnvironmentResponse(t, rec, privateEnv)
-	})
-
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	requireErrorResponse(t, rec, "encryption key size mismatch")
 }
 
 func TestHandleEnv_AppIDMismatchCheck(t *testing.T) {
 	logger := setupEnvLogger()
 
-	t.Run("App ID mismatch between attestation claims and encrypted env", func(t *testing.T) {
-		setup := setupHandleEnvTest(t)
+	for _, tc := range testConfigs {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Run("App ID mismatch between attestation claims and encrypted env", func(t *testing.T) {
+				setup := tc.setupFunc(t)
 
-		attestationAppID := "0x1111111111111111111111111111111111111111"
-		encryptedEnvAppID := "0x2222222222222222222222222222222222222222"
+				attestationAppID := "0x1111111111111111111111111111111111111111"
+				encryptedEnvAppID := "0x2222222222222222222222222222222222222222"
 
-		// Mock attestation to succeed with one app ID
-		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
-			Return(&attestation.AttestationClaims{
-				ImageDigest: testValidDigest,
-				AppID:       attestationAppID,
-			}, nil)
+				// Mock attestation to succeed with one app ID
+				claims := &attestation.AttestationClaims{
+					ImageDigest: testValidDigest,
+					AppID:       attestationAppID,
+				}
+				tc.setupAttestation(setup, claims)
 
-		// Create encrypted env data with different app ID in headers
-		privateEnv := types.Env{"SECRET_KEY": "secret_value"}
-		privateEnvJSON, _ := json.Marshal(privateEnv)
-		kmsPublicKeyPEM, _ := setup.FakeKMS.GetEncryptionPublicKeyPEM()
+				setup.MockAttestation.EXPECT().
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
+					Return(claims, nil)
 
-		// Use crypto.GetAppProtectedHeaders to add the wrong app ID
-		wrongHeaders := crypto.GetAppProtectedHeaders(encryptedEnvAppID)
-		encryptedPrivateEnv, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM(kmsPublicKeyPEM, privateEnvJSON, wrongHeaders)
-		require.NoError(t, err)
+				// Create encrypted env data with different app ID in headers
+				privateEnv := types.Env{"SECRET_KEY": "secret_value"}
+				privateEnvJSON, _ := json.Marshal(privateEnv)
+				kmsPublicKeyPEM, _ := setup.FakeKMS.GetEncryptionPublicKeyPEM()
 
-		// Mock chain client to return the encrypted env with wrong app ID
-		hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
-		require.NoError(t, err)
-		var expectedDigest [32]byte
-		copy(expectedDigest[:], hexDigest)
+				// Use crypto.GetAppProtectedHeaders to add the wrong app ID
+				wrongHeaders := crypto.GetAppProtectedHeaders(encryptedEnvAppID)
+				encryptedPrivateEnv, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM(kmsPublicKeyPEM, privateEnvJSON, wrongHeaders)
+				require.NoError(t, err)
 
-		publicEnv := types.Env{"PUBLIC_VAR": "public_value"}
-		setup.MockChainClient.EXPECT().
-			GetLatestRelease(gomock.Any(), attestationAppID).
-			Return(expectedDigest, publicEnv, []byte(encryptedPrivateEnv), nil)
+				// Mock chain client to return the encrypted env with wrong app ID
+				hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
+				require.NoError(t, err)
+				var expectedDigest [32]byte
+				copy(expectedDigest[:], hexDigest)
 
-		requestBody, _ := json.Marshal(setup.EnvRequest)
-		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
+				publicEnv := types.Env{"PUBLIC_VAR": "public_value"}
+				setup.MockChainClient.EXPECT().
+					GetLatestRelease(gomock.Any(), attestationAppID).
+					Return(expectedDigest, publicEnv, []byte(encryptedPrivateEnv), nil)
 
-		err = HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+				requestBody := tc.getRequestBody(setup)
+				c, rec := setupEchoContextWithBody(http.MethodPost, tc.endpoint, requestBody)
 
-		require.Error(t, err)
-		require.Equal(t, http.StatusUnauthorized, rec.Code)
-		require.Contains(t, err.Error(), "Encrypted env app id mismatch")
-		require.Contains(t, err.Error(), fmt.Sprintf("expected %s, got %s", attestationAppID, encryptedEnvAppID))
-	})
+				err = tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-	t.Run("Missing app ID header in encrypted env", func(t *testing.T) {
-		setup := setupHandleEnvTest(t)
+				require.NoError(t, err)
+				require.Equal(t, http.StatusUnauthorized, rec.Code)
 
-		appID := "0x1111111111111111111111111111111111111111"
+				requireErrorResponse(t, rec, "Encrypted env app id mismatch")
+			})
 
-		// Mock attestation to succeed
-		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
-			Return(&attestation.AttestationClaims{
-				ImageDigest: testValidDigest,
-				AppID:       appID,
-			}, nil)
+			t.Run("Missing app ID header in encrypted env", func(t *testing.T) {
+				setup := tc.setupFunc(t)
 
-		// Create encrypted env data WITHOUT app ID headers
-		privateEnv := types.Env{"SECRET_KEY": "secret_value"}
-		privateEnvJSON, _ := json.Marshal(privateEnv)
-		kmsPublicKeyPEM, _ := setup.FakeKMS.GetEncryptionPublicKeyPEM()
+				appID := "0x1111111111111111111111111111111111111111"
 
-		// Don't use GetAppProtectedHeaders - encrypt without the app ID header
-		encryptedPrivateEnv, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM(kmsPublicKeyPEM, privateEnvJSON, nil)
-		require.NoError(t, err)
+				// Mock attestation to succeed
+				claims := &attestation.AttestationClaims{
+					ImageDigest: testValidDigest,
+					AppID:       appID,
+				}
+				tc.setupAttestation(setup, claims)
 
-		// Mock chain client to return the encrypted env without app ID header
-		hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
-		require.NoError(t, err)
-		var expectedDigest [32]byte
-		copy(expectedDigest[:], hexDigest)
+				setup.MockAttestation.EXPECT().
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
+					Return(claims, nil)
 
-		publicEnv := types.Env{"PUBLIC_VAR": "public_value"}
-		setup.MockChainClient.EXPECT().
-			GetLatestRelease(gomock.Any(), appID).
-			Return(expectedDigest, publicEnv, []byte(encryptedPrivateEnv), nil)
+				// Create encrypted env data WITHOUT app ID headers
+				privateEnv := types.Env{"SECRET_KEY": "secret_value"}
+				privateEnvJSON, _ := json.Marshal(privateEnv)
+				kmsPublicKeyPEM, _ := setup.FakeKMS.GetEncryptionPublicKeyPEM()
 
-		requestBody, _ := json.Marshal(setup.EnvRequest)
-		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
+				// Don't use GetAppProtectedHeaders - encrypt without the app ID header
+				encryptedPrivateEnv, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM(kmsPublicKeyPEM, privateEnvJSON, nil)
+				require.NoError(t, err)
 
-		err = HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+				// Mock chain client to return the encrypted env without app ID header
+				hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
+				require.NoError(t, err)
+				var expectedDigest [32]byte
+				copy(expectedDigest[:], hexDigest)
 
-		require.Error(t, err)
-		require.Equal(t, http.StatusInternalServerError, rec.Code)
-		require.Contains(t, err.Error(), "Failed to get app id from encrypted env")
-	})
+				publicEnv := types.Env{"PUBLIC_VAR": "public_value"}
+				setup.MockChainClient.EXPECT().
+					GetLatestRelease(gomock.Any(), appID).
+					Return(expectedDigest, publicEnv, []byte(encryptedPrivateEnv), nil)
 
-	t.Run("Tampered JWE protected header fails authentication", func(t *testing.T) {
-		setup := setupHandleEnvTest(t)
+				requestBody := tc.getRequestBody(setup)
+				c, rec := setupEchoContextWithBody(http.MethodPost, tc.endpoint, requestBody)
 
-		// Victim's app ID (whose secrets we're trying to steal)
-		victimAppID := "0x1111111111111111111111111111111111111111"
-		// Attacker's app ID (who we are)
-		attackerAppID := "0x2222222222222222222222222222222222222222"
+				err = tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-		// Mock attestation to succeed with attacker's ID
-		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
-			Return(&attestation.AttestationClaims{
-				ImageDigest: testValidDigest,
-				AppID:       attackerAppID,
-			}, nil)
+				require.NoError(t, err)
+				require.Equal(t, http.StatusInternalServerError, rec.Code)
 
-		// Create victim's encrypted env data with victim's app ID in header
-		victimSecrets := types.Env{"VICTIM_SECRET_KEY": "victim_secret_value"}
-		victimSecretsJSON, _ := json.Marshal(victimSecrets)
-		kmsPublicKeyPEM, _ := setup.FakeKMS.GetEncryptionPublicKeyPEM()
+				requireErrorResponse(t, rec, "Failed to get app id from encrypted env")
+			})
 
-		// Encrypt with victim's app ID
-		victimHeaders := crypto.GetAppProtectedHeaders(victimAppID)
-		victimEncryptedEnv, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM(kmsPublicKeyPEM, victimSecretsJSON, victimHeaders)
-		require.NoError(t, err)
+			t.Run("Tampered JWE protected header fails authentication", func(t *testing.T) {
+				setup := tc.setupFunc(t)
 
-		// Attacker attempts to tamper: replace victim's AppID with attacker's AppID in protected header
-		// to try to steal victim's secrets
-		jweString := string(victimEncryptedEnv)
-		parts := strings.Split(jweString, ".")
-		require.Equal(t, 5, len(parts), "JWE should have 5 parts in compact format")
+				// Victim's app ID (whose secrets we're trying to steal)
+				victimAppID := "0x1111111111111111111111111111111111111111"
+				// Attacker's app ID (who we are)
+				attackerAppID := "0x2222222222222222222222222222222222222222"
 
-		// Decode the protected header
-		protectedHeaderBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
-		require.NoError(t, err)
+				// Mock attestation to succeed with attacker's ID
+				claims := &attestation.AttestationClaims{
+					ImageDigest: testValidDigest,
+					AppID:       attackerAppID,
+				}
+				tc.setupAttestation(setup, claims)
 
-		var protectedHeader map[string]interface{}
-		err = json.Unmarshal(protectedHeaderBytes, &protectedHeader)
-		require.NoError(t, err)
+				setup.MockAttestation.EXPECT().
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
+					Return(claims, nil)
 
-		// Attacker changes the app ID to their own
-		protectedHeader[crypto.JWEAppIDHeader] = attackerAppID
+				// Create victim's encrypted env data with victim's app ID in header
+				victimSecrets := types.Env{"VICTIM_SECRET_KEY": "victim_secret_value"}
+				victimSecretsJSON, _ := json.Marshal(victimSecrets)
+				kmsPublicKeyPEM, _ := setup.FakeKMS.GetEncryptionPublicKeyPEM()
 
-		// Re-encode the modified header
-		modifiedHeaderBytes, _ := json.Marshal(protectedHeader)
-		modifiedHeaderBase64 := base64.RawURLEncoding.EncodeToString(modifiedHeaderBytes)
+				// Encrypt with victim's app ID
+				victimHeaders := crypto.GetAppProtectedHeaders(victimAppID)
+				victimEncryptedEnv, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM(kmsPublicKeyPEM, victimSecretsJSON, victimHeaders)
+				require.NoError(t, err)
 
-		// Reconstruct JWE with attacker's app ID in header
-		parts[0] = modifiedHeaderBase64
-		tamperedEnv := []byte(strings.Join(parts, "."))
+				// Attacker attempts to tamper: replace victim's AppID with attacker's AppID in protected header
+				// to try to steal victim's secrets
+				jweString := string(victimEncryptedEnv)
+				parts := strings.Split(jweString, ".")
+				require.Equal(t, 5, len(parts), "JWE should have 5 parts in compact format")
 
-		// Mock chain client - attacker deployed victim's (tampered) secrets as their own
-		hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
-		require.NoError(t, err)
-		var expectedDigest [32]byte
-		copy(expectedDigest[:], hexDigest)
+				// Decode the protected header
+				protectedHeaderBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+				require.NoError(t, err)
 
-		publicEnv := types.Env{"PUBLIC_VAR": "public_value"}
-		setup.MockChainClient.EXPECT().
-			GetLatestRelease(gomock.Any(), attackerAppID).
-			Return(expectedDigest, publicEnv, tamperedEnv, nil)
+				var protectedHeader map[string]interface{}
+				err = json.Unmarshal(protectedHeaderBytes, &protectedHeader)
+				require.NoError(t, err)
 
-		requestBody, _ := json.Marshal(setup.EnvRequest)
-		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
+				// Attacker changes the app ID to their own
+				protectedHeader[crypto.JWEAppIDHeader] = attackerAppID
 
-		err = HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+				// Re-encode the modified header
+				modifiedHeaderBytes, _ := json.Marshal(protectedHeader)
+				modifiedHeaderBase64 := base64.RawURLEncoding.EncodeToString(modifiedHeaderBytes)
 
-		require.Error(t, err)
-		require.Equal(t, http.StatusInternalServerError, rec.Code)
+				// Reconstruct JWE with attacker's app ID in header
+				parts[0] = modifiedHeaderBase64
+				tamperedEnv := []byte(strings.Join(parts, "."))
 
-		// The tampered JWE should fail decryption due to AEAD authentication tag verification
-		// The protected header is part of the Additional Authenticated Data (AAD)
-		require.Contains(t, err.Error(), "Failed to decrypt encrypted env",
-			"Expected decryption failure due to tampered protected header")
-	})
+				// Mock chain client - attacker deployed victim's (tampered) secrets as their own
+				hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
+				require.NoError(t, err)
+				var expectedDigest [32]byte
+				copy(expectedDigest[:], hexDigest)
 
-	t.Run("Case insensitive AppID comparison", func(t *testing.T) {
-		setup := setupHandleEnvTest(t)
+				publicEnv := types.Env{"PUBLIC_VAR": "public_value"}
+				setup.MockChainClient.EXPECT().
+					GetLatestRelease(gomock.Any(), attackerAppID).
+					Return(expectedDigest, publicEnv, tamperedEnv, nil)
 
-		// Use different case app IDs that should match when compared case-insensitively
-		lowerCaseAppID := "0xabcd1234567890abcd1234567890abcd12345678"
-		mixedCaseAppID := "0xABCD1234567890ABCD1234567890ABCD12345678"
+				requestBody := tc.getRequestBody(setup)
+				c, rec := setupEchoContextWithBody(http.MethodPost, tc.endpoint, requestBody)
 
-		// Mock attestation with mixed case
-		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
-			Return(&attestation.AttestationClaims{
-				ImageDigest: testValidDigest,
-				AppID:       mixedCaseAppID,
-			}, nil)
+				err = tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-		// Create encrypted env with lowercase
-		privateEnv := types.Env{"SECRET_KEY": "secret_value"}
-		privateEnvJSON, _ := json.Marshal(privateEnv)
-		kmsPublicKeyPEM, _ := setup.FakeKMS.GetEncryptionPublicKeyPEM()
+				require.NoError(t, err)
+				require.Equal(t, http.StatusInternalServerError, rec.Code)
 
-		appHeaders := crypto.GetAppProtectedHeaders(lowerCaseAppID)
-		encryptedPrivateEnv, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM(kmsPublicKeyPEM, privateEnvJSON, appHeaders)
-		require.NoError(t, err)
+				// The tampered JWE should fail decryption due to AEAD authentication tag verification
+				// The protected header is part of the Additional Authenticated Data (AAD)
+				requireErrorResponse(t, rec, "Failed to decrypt encrypted env")
+			})
 
-		// Mock chain client
-		hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
-		require.NoError(t, err)
-		var expectedDigest [32]byte
-		copy(expectedDigest[:], hexDigest)
+			t.Run("Case insensitive AppID comparison", func(t *testing.T) {
+				setup := tc.setupFunc(t)
 
-		publicEnv := types.Env{"PUBLIC_VAR": "public_value"}
-		setup.MockChainClient.EXPECT().
-			GetLatestRelease(gomock.Any(), mixedCaseAppID).
-			Return(expectedDigest, publicEnv, encryptedPrivateEnv, nil)
+				// Use different case app IDs that should match when compared case-insensitively
+				lowerCaseAppID := "0xabcd1234567890abcd1234567890abcd12345678"
+				mixedCaseAppID := "0xABCD1234567890ABCD1234567890ABCD12345678"
 
-		requestBody, _ := json.Marshal(setup.EnvRequest)
-		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
+				// Mock attestation with mixed case
+				claims := &attestation.AttestationClaims{
+					ImageDigest: testValidDigest,
+					AppID:       mixedCaseAppID,
+				}
+				tc.setupAttestation(setup, claims)
 
-		err = HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+				setup.MockAttestation.EXPECT().
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
+					Return(claims, nil)
 
-		// Should succeed despite case mismatch
-		require.NoError(t, err)
-		require.Equal(t, http.StatusOK, rec.Code)
-	})
+				// Create encrypted env with lowercase
+				privateEnv := types.Env{"SECRET_KEY": "secret_value"}
+				privateEnvJSON, _ := json.Marshal(privateEnv)
+				kmsPublicKeyPEM, _ := setup.FakeKMS.GetEncryptionPublicKeyPEM()
+
+				appHeaders := crypto.GetAppProtectedHeaders(lowerCaseAppID)
+				encryptedPrivateEnv, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM(kmsPublicKeyPEM, privateEnvJSON, appHeaders)
+				require.NoError(t, err)
+
+				// Mock chain client
+				hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
+				require.NoError(t, err)
+				var expectedDigest [32]byte
+				copy(expectedDigest[:], hexDigest)
+
+				publicEnv := types.Env{"PUBLIC_VAR": "public_value"}
+				setup.MockChainClient.EXPECT().
+					GetLatestRelease(gomock.Any(), mixedCaseAppID).
+					Return(expectedDigest, publicEnv, encryptedPrivateEnv, nil)
+
+				requestBody := tc.getRequestBody(setup)
+				c, rec := setupEchoContextWithBody(http.MethodPost, tc.endpoint, requestBody)
+
+				err = tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+				// Should succeed despite case mismatch
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, rec.Code)
+			})
+		})
+	}
 }
 
 func TestHandleEnv_DebugModeAppIDOverride(t *testing.T) {
 	logger := setupEnvLogger()
 
-	t.Run("AppID override in debug mode", func(t *testing.T) {
+	for _, tc := range testConfigs {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Run("AppID override in debug mode", func(t *testing.T) {
+				setup := tc.setupFunc(t)
+
+				originalAppID := "0x2222222222222222222222222222222222222222"
+				overrideAppID := "0x9999999999999999999999999999999999999999"
+
+				// Mock attestation to succeed with original AppID
+				claims := &attestation.AttestationClaims{
+					ImageDigest: testValidDigest,
+					AppID:       originalAppID,
+				}
+				tc.setupAttestation(setup, claims)
+
+				setup.MockAttestation.EXPECT().
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
+					Return(claims, nil)
+
+				// Setup chain client to expect call with OVERRIDE AppID
+				privateEnv := types.Env{"SECRET_KEY": "debug_secret"}
+				setup.setupSuccessfulChainClient(t, overrideAppID, privateEnv)
+
+				requestBody := tc.getRequestBody(setup)
+				c, rec := setupEchoContextWithBodyAndQuery(http.MethodPost, tc.endpoint, requestBody, map[string]string{"appID": overrideAppID})
+
+				// Enable debug mode
+				err := tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, true)
+
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, rec.Code)
+			})
+
+			t.Run("No AppID override in non-debug mode", func(t *testing.T) {
+				setup := tc.setupFunc(t)
+
+				originalAppID := "0x2222222222222222222222222222222222222222"
+				overrideAppID := "0x9999999999999999999999999999999999999999"
+
+				// Mock attestation to succeed with original AppID
+				claims := &attestation.AttestationClaims{
+					ImageDigest: testValidDigest,
+					AppID:       originalAppID,
+				}
+				tc.setupAttestation(setup, claims)
+
+				setup.MockAttestation.EXPECT().
+					VerifyAttestation(gomock.Any(), gomock.Any(), tc.provider).
+					Return(claims, nil)
+
+				requestBody := tc.getRequestBody(setup)
+				c, rec := setupEchoContextWithBodyAndQuery(http.MethodPost, tc.endpoint, requestBody, map[string]string{"appID": overrideAppID})
+
+				// Disable debug mode
+				err := tc.handler(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+				require.NoError(t, err)
+				require.Equal(t, http.StatusBadRequest, rec.Code)
+
+				requireErrorResponse(t, rec, "appID query parameter is only allowed in debug mode")
+			})
+		})
+	}
+}
+
+func TestHandleEnv_V1_WithNonce(t *testing.T) {
+	logger := setupEnvLogger()
+
+	t.Run("V1 endpoint fails with nonce in attestation", func(t *testing.T) {
 		setup := setupHandleEnvTest(t)
 
-		originalAppID := "0x2222222222222222222222222222222222222222"
-		overrideAppID := "0x9999999999999999999999999999999999999999"
+		// Mock attestation to return nonce (which V1 should reject)
+		claims := &attestation.AttestationClaims{
+			ImageDigest: testValidDigest,
+			AppID:       testEnvAppID,
+			Nonce:       "some_random_nonce",
+		}
 
-		// Mock attestation to succeed with original AppID
 		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
-			Return(&attestation.AttestationClaims{
-				ImageDigest: testValidDigest,
-				AppID:       originalAppID,
-			}, nil)
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.GoogleConfidentialSpace).
+			Return(claims, nil)
 
-		// Setup chain client to expect call with OVERRIDE AppID
-		privateEnv := types.Env{"SECRET_KEY": "debug_secret"}
-		setup.setupSuccessfulChainClient(t, overrideAppID, privateEnv)
+		requestBody, _ := json.Marshal(setup.EnvRequestV1)
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
 
-		requestBody, _ := json.Marshal(setup.EnvRequest)
-		c, rec := setupEchoContextWithBodyAndQuery(http.MethodPost, "/env", requestBody, map[string]string{"appID": overrideAppID})
+		err := HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-		// Enable debug mode
-		err := HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, true)
+		// Should fail - V1 doesn't support nonces
+		require.NoError(t, err)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
 
+		requireErrorResponse(t, rec, "nonce should be empty for env v1 requests")
+	})
+}
+
+func TestHandleEnvV2_NonceValidation(t *testing.T) {
+	logger := setupEnvLogger()
+
+	t.Run("V2 endpoint fails without nonce", func(t *testing.T) {
+		setup := setupHandleEnvV2Test(t)
+
+		// Mock attestation to return NO nonce
+		claims := &attestation.AttestationClaims{
+			ImageDigest: testValidDigest,
+			AppID:       testEnvAppID,
+			Nonce:       "", // Empty nonce
+		}
+
+		setup.MockAttestation.EXPECT().
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
+			Return(claims, nil)
+
+		requestBody, _ := json.Marshal(setup.EnvRequestV2)
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v2", requestBody)
+
+		err := HandleEnvV2(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+		// Should fail - V2 requires nonce
+		require.NoError(t, err)
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+		requireErrorResponse(t, rec, "no nonce found in attestation claims")
+	})
+
+	t.Run("V2 endpoint fails with wrong nonce", func(t *testing.T) {
+		setup := setupHandleEnvV2Test(t)
+
+		// Mock attestation to return WRONG nonce
+		claims := &attestation.AttestationClaims{
+			ImageDigest: testValidDigest,
+			AppID:       testEnvAppID,
+			Nonce:       "wrong_nonce_hash",
+		}
+
+		setup.MockAttestation.EXPECT().
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
+			Return(claims, nil)
+
+		requestBody, _ := json.Marshal(setup.EnvRequestV2)
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v2", requestBody)
+
+		err := HandleEnvV2(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+		// Should fail - nonce doesn't match RSA key hash
+		require.NoError(t, err)
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+		requireErrorResponse(t, rec, "RSA key attestation mismatch")
+	})
+
+	t.Run("V2 endpoint succeeds with correct nonce", func(t *testing.T) {
+		setup := setupHandleEnvV2Test(t)
+
+		// Calculate the correct RSA key hash
+		expectedHash := setup.getRSAKeyHash()
+
+		// Mock attestation to return correct nonce
+		claims := &attestation.AttestationClaims{
+			ImageDigest: testValidDigest,
+			AppID:       testEnvAppID,
+			Nonce:       expectedHash,
+		}
+
+		setup.MockAttestation.EXPECT().
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
+			Return(claims, nil)
+
+		// Setup successful chain client response
+		privateEnv := types.Env{"SECRET_KEY": "secret_value"}
+		setup.setupSuccessfulChainClient(t, testEnvAppID, privateEnv)
+
+		requestBody, _ := json.Marshal(setup.EnvRequestV2)
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v2", requestBody)
+
+		err := HandleEnvV2(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+		// Should succeed - nonce matches RSA key hash
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code)
 	})
+}
 
-	t.Run("No AppID override in non-debug mode", func(t *testing.T) {
+func TestHandleEnv_V1_RejectsIntelAttestation(t *testing.T) {
+	logger := setupEnvLogger()
+
+	t.Run("V1 endpoint only accepts Google CS and rejects Intel", func(t *testing.T) {
 		setup := setupHandleEnvTest(t)
 
-		originalAppID := "0x2222222222222222222222222222222222222222"
-		overrideAppID := "0x9999999999999999999999999999999999999999"
-
-		// Mock attestation to succeed with original AppID
 		setup.MockAttestation.EXPECT().
-			VerifyAttestation(gomock.Any(), gomock.Any()).
-			Return(&attestation.AttestationClaims{
-				ImageDigest: testValidDigest,
-				AppID:       originalAppID,
-			}, nil)
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.GoogleConfidentialSpace).
+			Return(nil, errors.New("google attestation failed"))
 
-		requestBody, _ := json.Marshal(setup.EnvRequest)
-		c, rec := setupEchoContextWithBodyAndQuery(http.MethodPost, "/env", requestBody, map[string]string{"appID": overrideAppID})
+		requestBody, _ := json.Marshal(setup.EnvRequestV1)
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env", requestBody)
 
-		// Disable debug mode
 		err := HandleEnv(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
 
-		require.Error(t, err)
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, err.Error(), "appID query parameter is only allowed in debug mode")
+		// Should fail - V1 only accepts Google Confidential Space attestation
+		require.NoError(t, err) // Echo handlers don't return Go errors
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+		requireErrorResponse(t, rec, "Attestation verification failed")
 	})
+}
 
+func TestHandleEnvV2_RejectsGoogleAttestation(t *testing.T) {
+	logger := setupEnvLogger()
+
+	t.Run("V2 endpoint rejects Google CS attestation", func(t *testing.T) {
+		setup := setupHandleEnvV2Test(t)
+
+		// Mock Intel attestation to fail (V2 only tries Intel)
+		setup.MockAttestation.EXPECT().
+			VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
+			Return(nil, errors.New("intel attestation failed"))
+
+		requestBody, _ := json.Marshal(setup.EnvRequestV2)
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v2", requestBody)
+
+		err := HandleEnvV2(c, logger, setup.MockAttestation, setup.MockChainClient, setup.FakeKMS, false)
+
+		// Should fail - V2 only accepts Intel
+		require.NoError(t, err)
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+		requireErrorResponse(t, rec, "Attestation verification failed")
+	})
 }

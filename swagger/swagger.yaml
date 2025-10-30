@@ -1,7 +1,20 @@
 basePath: /
 definitions:
-  types.AddressesResponse:
+  types.AddressesResponseV1:
     properties:
+      evmAddresses:
+        items:
+          $ref: '#/definitions/types.EVMAddressAndDerivationPath'
+        type: array
+      solanaAddresses:
+        items:
+          $ref: '#/definitions/types.SolanaAddressAndDerivationPath'
+        type: array
+    type: object
+  types.AddressesResponseV2:
+    properties:
+      appId:
+        type: string
       evmAddresses:
         items:
           $ref: '#/definitions/types.EVMAddressAndDerivationPath'
@@ -19,29 +32,59 @@ definitions:
       derivationPath:
         type: string
     type: object
-  types.EnvRequest:
+  types.EnvRequestV1:
     properties:
       encryptedJwtWithRsaKey:
         type: string
     type: object
-  types.EnvResponse:
+  types.EnvRequestV2:
+    properties:
+      jwtWithAttestedRsaKey:
+        type: string
+      rsaKey:
+        type: string
+    type: object
+  types.EnvResponseV1:
     properties:
       encryptedCombinedEnv:
         type: string
     type: object
-  types.SignedResponse-types_AddressesResponse:
+  types.EnvResponseV2:
+    properties:
+      encryptedCombinedEnv:
+        type: string
+    type: object
+  types.SignedResponse-types_AddressesResponseV1:
     properties:
       data:
-        $ref: '#/definitions/types.AddressesResponse'
+        $ref: '#/definitions/types.AddressesResponseV1'
       signature:
         items:
           type: integer
         type: array
     type: object
-  types.SignedResponse-types_EnvResponse:
+  types.SignedResponse-types_AddressesResponseV2:
     properties:
       data:
-        $ref: '#/definitions/types.EnvResponse'
+        $ref: '#/definitions/types.AddressesResponseV2'
+      signature:
+        items:
+          type: integer
+        type: array
+    type: object
+  types.SignedResponse-types_EnvResponseV1:
+    properties:
+      data:
+        $ref: '#/definitions/types.EnvResponseV1'
+      signature:
+        items:
+          type: integer
+        type: array
+    type: object
+  types.SignedResponse-types_EnvResponseV2:
+    properties:
+      data:
+        $ref: '#/definitions/types.EnvResponseV2'
       signature:
         items:
           type: integer
@@ -82,7 +125,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/types.SignedResponse-types_AddressesResponse'
+            $ref: '#/definitions/types.SignedResponse-types_AddressesResponseV1'
         "400":
           description: Bad Request
           schema:
@@ -98,6 +141,43 @@ paths:
       summary: Get EVM addresses
       tags:
       - addresses
+  /addresses/v2:
+    get:
+      consumes:
+      - application/json
+      description: Derive EVM addresses from app's HD wallet, includes appId in response
+      parameters:
+      - description: Application ID
+        in: query
+        name: appID
+        required: true
+        type: string
+      - description: 'Number of addresses to derive (default: 1, max: 100)'
+        in: query
+        name: count
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/types.SignedResponse-types_AddressesResponseV2'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get EVM addresses (V2)
+      tags:
+      - addresses
   /env:
     post:
       consumes:
@@ -110,7 +190,7 @@ paths:
         name: data
         required: true
         schema:
-          $ref: '#/definitions/types.EnvRequest'
+          $ref: '#/definitions/types.EnvRequestV1'
       - description: App ID override (debug mode only)
         in: query
         name: appID
@@ -121,7 +201,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/types.SignedResponse-types_EnvResponse'
+            $ref: '#/definitions/types.SignedResponse-types_EnvResponseV1'
         "400":
           description: Bad Request
           schema:
@@ -141,6 +221,51 @@ paths:
               type: string
             type: object
       summary: Get environment variables
+      tags:
+      - environment
+  /env/v2:
+    post:
+      consumes:
+      - application/json
+      description: Retrieve encrypted environment variables and mnemonic for authenticated
+        app using attested RSA key
+      parameters:
+      - description: JWT with attested RSA public key
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/types.EnvRequestV2'
+      - description: App ID override (debug mode only)
+        in: query
+        name: appID
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/types.SignedResponse-types_EnvResponseV2'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get environment variables (V2)
       tags:
       - environment
   /health:
