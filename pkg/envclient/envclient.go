@@ -24,12 +24,12 @@ const (
 	maxElapsedTime        = 2 * time.Minute
 	attestationSocketPath = "/run/container_launcher/teeserver.sock"
 	attestationTokenURL   = "http://localhost/v1/intel/token"
-	publicNonce           = "eigenx-dashboard"
+	dashboardNonce        = "eigenx-dashboard"
 )
 
 // AttestationTokenProvider interface for generating attestation tokens
 type AttestationTokenProvider interface {
-	GetToken(ctx context.Context, nonce string) (string, error)
+	GetToken(ctx context.Context, audience, nonce string) (string, error)
 }
 
 // ConfidentialSpaceTokenProvider implements AttestationTokenProvider using Intel Trust Authority via GCP Confidential Space
@@ -49,10 +49,10 @@ type attestationTokenRequest struct {
 	Nonces    []string `json:"nonces"`
 }
 
-func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, nonce string) (string, error) {
+func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, audience, nonce string) (string, error) {
 	// Create request with EigenX KMS audience
 	tokenReq := attestationTokenRequest{
-		Audience:  types.JWTAudience,
+		Audience:  audience,
 		TokenType: "OIDC",
 		Nonces:    []string{nonce},
 	}
@@ -71,7 +71,7 @@ func (p *ConfidentialSpaceTokenProvider) GetToken(ctx context.Context, nonce str
 		},
 	}
 
-	p.logger.Debug("Requesting attestation token", "audience", types.JWTAudience, "nonce", nonce)
+	p.logger.Debug("Requesting attestation token", "audience", audience, "nonce", nonce)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", attestationTokenURL, bytes.NewReader(reqBody))
 	if err != nil {
@@ -134,7 +134,7 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 
 	// Request attestation token with RSA key hash as nonce
 	e.Logger.Info("Requesting attestation token")
-	jwt, err := e.tokenProvider.GetToken(ctx, rsaKeyHashHex)
+	jwt, err := e.tokenProvider.GetToken(ctx, types.KMSJWTAudience, rsaKeyHashHex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get attestation token: %w", err)
 	}
@@ -180,7 +180,7 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 
 	// Generate a new JWT with empty nonce for user API upload
 	e.Logger.Info("Generating attestation token with empty nonce for user API")
-	uploadJWT, err := e.tokenProvider.GetToken(ctx, publicNonce)
+	uploadJWT, err := e.tokenProvider.GetToken(ctx, types.DashboardJWTAudience, dashboardNonce)
 	if err != nil {
 		e.Logger.Error("Failed to get attestation token for user API", "error", err)
 		// Not a fatal error - continue with returning environment variables

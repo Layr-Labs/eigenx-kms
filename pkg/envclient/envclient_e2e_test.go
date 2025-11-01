@@ -41,7 +41,7 @@ type mockAttestationTokenProvider struct {
 	err       error
 }
 
-func (m *mockAttestationTokenProvider) GetToken(ctx context.Context, nonce string) (string, error) {
+func (m *mockAttestationTokenProvider) GetToken(ctx context.Context, audience, nonce string) (string, error) {
 	if m.err != nil {
 		return "", m.err
 	}
