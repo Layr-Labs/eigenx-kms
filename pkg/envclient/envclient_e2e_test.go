@@ -41,7 +41,7 @@ type mockAttestationTokenProvider struct {
 	err       error
 }
 
-func (m *mockAttestationTokenProvider) GetToken(ctx context.Context, nonce string) (string, error) {
+func (m *mockAttestationTokenProvider) GetToken(ctx context.Context, audience, nonce string) (string, error) {
 	if m.err != nil {
 		return "", m.err
 	}
@@ -67,6 +67,7 @@ func (m *mockAttestationTokenProvider) GetToken(ctx context.Context, nonce strin
 // TestKMSServer represents a test KMS server setup
 type TestKMSServer struct {
 	Server          *httptest.Server
+	UserAPIServer   *httptest.Server
 	FakeKMS         *fakes.FakeKMS
 	MockAttestation *attestationMocks.MockAttestationVerifierInterface
 	MockChainClient *chainClientMocks.MockChainClient
@@ -101,8 +102,28 @@ func NewTestKMSServer(t *testing.T) *TestKMSServer {
 	server := httptest.NewServer(e)
 	t.Cleanup(server.Close)
 
+	// Create mock user API server
+	userAPIEcho := echo.New()
+	userAPIEcho.GET("/", func(c echo.Context) error {
+		return c.JSON(200, map[string]string{"status": "ok"})
+	})
+	userAPIEcho.POST("/attestation", func(c echo.Context) error {
+		var req map[string]string
+		if err := c.Bind(&req); err != nil {
+			return c.JSON(400, map[string]string{"error": "invalid request"})
+		}
+		if req["jwt"] == "" {
+			return c.JSON(400, map[string]string{"error": "missing jwt"})
+		}
+		return c.JSON(200, map[string]string{"status": "attestation received"})
+	})
+
+	userAPIServer := httptest.NewServer(userAPIEcho)
+	t.Cleanup(userAPIServer.Close)
+
 	return &TestKMSServer{
 		Server:          server,
+		UserAPIServer:   userAPIServer,
 		FakeKMS:         fakeKMS,
 		MockAttestation: mockAttestation,
 		MockChainClient: mockChainClient,
@@ -196,7 +217,7 @@ func TestEnvClient_E2E_Success(t *testing.T) {
 	mockTokenProvider := &mockAttestationTokenProvider{baseToken: mockJWT}
 
 	// Create EnvClient
-	client := NewEnvClient(testServer.Logger, mockTokenProvider, signingKey, testServer.Server.URL)
+	client := NewEnvClient(testServer.Logger, mockTokenProvider, signingKey, testServer.Server.URL, testServer.UserAPIServer.URL)
 
 	// Test the GetEnv method
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -240,7 +261,7 @@ func TestEnvClient_E2E_InvalidSignature(t *testing.T) {
 
 	mockJWT := `{"sub":"test-app","iat":1234567890,"app_id":"` + testAppID + `"}`
 	mockTokenProvider := &mockAttestationTokenProvider{baseToken: mockJWT}
-	client := NewEnvClient(testServer.Logger, mockTokenProvider, wrongSigningKey, testServer.Server.URL)
+	client := NewEnvClient(testServer.Logger, mockTokenProvider, wrongSigningKey, testServer.Server.URL, testServer.UserAPIServer.URL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -260,7 +281,7 @@ func TestEnvClient_E2E_ServerDown(t *testing.T) {
 
 	mockJWT := `{"sub":"test-app","iat":1234567890,"app_id":"` + testAppID + `"}`
 	mockTokenProvider := &mockAttestationTokenProvider{baseToken: mockJWT}
-	client := NewEnvClient(logger, mockTokenProvider, []byte(signingKey), "http://localhost:99999") // non-existent server
+	client := NewEnvClient(logger, mockTokenProvider, []byte(signingKey), "http://localhost:99999", "http://localhost:99998") // non-existent servers
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -268,4 +289,48 @@ func TestEnvClient_E2E_ServerDown(t *testing.T) {
 	_, err = client.GetEnv(ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to send request after retries")
+}
+
+func TestEnvClient_E2E_UserAPIDown(t *testing.T) {
+	testServer := NewTestKMSServer(t)
+
+	// Setup successful mocks for KMS server
+	privateEnv := types.Env{
+		"SECRET_KEY":   "secret_value_123",
+		"DATABASE_URL": "postgres://test:test@localhost/testdb",
+		"API_TOKEN":    "token_abc123",
+	}
+	testServer.SetupSuccessfulMocks(t, testAppID, privateEnv)
+
+	// Get KMS signing key
+	_, signingKey, err := testServer.GetKMSKeys()
+	require.NoError(t, err)
+
+	// Create a mock JWT
+	mockJWT := `{"sub":"test-app","iat":1234567890,"app_id":"` + testAppID + `"}`
+
+	// Create mock token provider
+	mockTokenProvider := &mockAttestationTokenProvider{baseToken: mockJWT}
+
+	// Create EnvClient with non-existent user API URL
+	client := NewEnvClient(testServer.Logger, mockTokenProvider, signingKey, testServer.Server.URL, "http://localhost:99998")
+
+	// Test the GetEnv method - should succeed despite user API being down
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	envBytes, err := client.GetEnv(ctx)
+	// Should NOT error - user API failure is not fatal
+	require.NoError(t, err)
+	require.NotEmpty(t, envBytes)
+
+	// Parse the returned environment to verify we got valid data
+	var returnedEnv types.Env
+	err = json.Unmarshal(envBytes, &returnedEnv)
+	require.NoError(t, err)
+
+	// Verify all expected environment variables are present
+	require.Equal(t, "secret_value_123", returnedEnv["SECRET_KEY"])
+	require.Equal(t, "postgres://test:test@localhost/testdb", returnedEnv["DATABASE_URL"])
+	require.Equal(t, "token_abc123", returnedEnv["API_TOKEN"])
 }

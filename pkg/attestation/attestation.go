@@ -177,8 +177,8 @@ func (av *AttestationVerifier) VerifyAttestation(ctx context.Context, tokenStrin
 		return nil, fmt.Errorf("audience must contain exactly one value, got %d", len(audiences))
 	}
 	audStr := audiences[0]
-	if audStr != googleAudience && audStr != types.JWTAudience {
-		return nil, fmt.Errorf("invalid audience: expected %s or %s, got %s", googleAudience, types.JWTAudience, audStr)
+	if audStr != googleAudience && audStr != types.KMSJWTAudience {
+		return nil, fmt.Errorf("invalid audience: expected %s or %s, got %s", googleAudience, types.KMSJWTAudience, audStr)
 	}
 
 	// Parse token into structured format

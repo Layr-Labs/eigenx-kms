@@ -140,4 +140,11 @@ var (
 		Name:  "output",
 		Usage: "Output file path to write environment variables in key=value format",
 	}
+
+	UserAPIURLFlag = &cli.StringFlag{
+		Name:     "userapi-url",
+		Usage:    "User API URL to POST attestation JWT",
+		EnvVars:  []string{"USERAPI_URL"},
+		Required: true,
+	}
 )
