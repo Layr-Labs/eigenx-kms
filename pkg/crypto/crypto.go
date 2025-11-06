@@ -15,12 +15,14 @@ import (
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
+	hdwallet "github.com/miguelmota/go-ethereum-hdwallet"
 )
 
 var (
-	KMSSignatureHeader     = []byte("COMPUTE_APP_KMS_SIGNATURE_V1")
-	EnvRequestRSAKeyHeader = []byte("COMPUTE_APP_ENV_REQUEST_RSA_KEY_V1")
-	JWEAppIDHeader         = "x-eigenx-app-id"
+	KMSSignatureHeader        = []byte("COMPUTE_APP_KMS_SIGNATURE_V1")
+	EnvRequestRSAKeyHeader    = []byte("COMPUTE_APP_ENV_REQUEST_RSA_KEY_V1")
+	AppDerivedAddressesHeader = []byte("COMPUTE_APP_DERIVED_ADDRESSES_V1")
+	JWEAppIDHeader            = "x-eigenx-app-id"
 )
 
 // GenerateRSAKeyPair generates a 4096-bit RSA private key and public key
@@ -204,4 +206,38 @@ func VerifyKMSSignature[T any](signedResponse types.SignedResponse[T], publicKey
 	}
 
 	return true, nil
+}
+
+func DeriveAddressesFromMnemonic(mnemonic string, count int) ([]types.EVMAddressAndDerivationPath, []types.SolanaAddressAndDerivationPath, error) {
+	evmAddresses := make([]types.EVMAddressAndDerivationPath, count)
+	solanaAddresses := make([]types.SolanaAddressAndDerivationPath, count)
+
+	// Derive addresses from mnemonic
+	evmWallet, err := hdwallet.NewFromMnemonic(mnemonic)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create EVM wallet from mnemonic: %v", err)
+	}
+	for i := 0; i < count; i++ {
+		evmPath := fmt.Sprintf("m/44'/60'/0'/0/%d", i)
+		hdpath := hdwallet.MustParseDerivationPath(evmPath)
+		evmAccount, err := evmWallet.Derive(hdpath, false)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to derive EVM address at index %d: %v", i, err)
+		}
+		solanaPath := fmt.Sprintf("m/44'/501'/%d'/0'", i)
+		solanaWallet, err := GenerateSolanaWalletFromMnemonicSeed(mnemonic, uint32(i))
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to derive Solana address at index %d: %v", i, err)
+		}
+
+		evmAddresses[i] = types.EVMAddressAndDerivationPath{
+			Address:        evmAccount.Address,
+			DerivationPath: evmPath,
+		}
+		solanaAddresses[i] = types.SolanaAddressAndDerivationPath{
+			Address:        solanaWallet.PublicKey().String(),
+			DerivationPath: solanaPath,
+		}
+	}
+	return evmAddresses, solanaAddresses, nil
 }

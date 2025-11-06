@@ -200,9 +200,9 @@ func TestEnvClient_E2E_Success(t *testing.T) {
 
 	// Setup successful mocks
 	privateEnv := types.Env{
-		"SECRET_KEY":   "secret_value_123",
-		"DATABASE_URL": "postgres://test:test@localhost/testdb",
-		"API_TOKEN":    "token_abc123",
+		types.MnemonicEnvVarName: testMnemonic,
+		"DATABASE_URL":           "postgres://test:test@localhost/testdb",
+		"API_TOKEN":              "token_abc123",
 	}
 	testServer.SetupSuccessfulMocks(t, testAppID, privateEnv)
 
@@ -233,7 +233,7 @@ func TestEnvClient_E2E_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all expected environment variables are present
-	require.Equal(t, "secret_value_123", returnedEnv["SECRET_KEY"])
+	require.Equal(t, testMnemonic, returnedEnv[types.MnemonicEnvVarName])
 	require.Equal(t, "postgres://test:test@localhost/testdb", returnedEnv["DATABASE_URL"])
 	require.Equal(t, "token_abc123", returnedEnv["API_TOKEN"])
 	require.Equal(t, "public_value", returnedEnv["PUBLIC_VAR"])
@@ -296,9 +296,9 @@ func TestEnvClient_E2E_UserAPIDown(t *testing.T) {
 
 	// Setup successful mocks for KMS server
 	privateEnv := types.Env{
-		"SECRET_KEY":   "secret_value_123",
-		"DATABASE_URL": "postgres://test:test@localhost/testdb",
-		"API_TOKEN":    "token_abc123",
+		types.MnemonicEnvVarName: testMnemonic,
+		"DATABASE_URL":           "postgres://test:test@localhost/testdb",
+		"API_TOKEN":              "token_abc123",
 	}
 	testServer.SetupSuccessfulMocks(t, testAppID, privateEnv)
 
@@ -330,7 +330,7 @@ func TestEnvClient_E2E_UserAPIDown(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all expected environment variables are present
-	require.Equal(t, "secret_value_123", returnedEnv["SECRET_KEY"])
+	require.Equal(t, testMnemonic, returnedEnv[types.MnemonicEnvVarName])
 	require.Equal(t, "postgres://test:test@localhost/testdb", returnedEnv["DATABASE_URL"])
 	require.Equal(t, "token_abc123", returnedEnv["API_TOKEN"])
 }

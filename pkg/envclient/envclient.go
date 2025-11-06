@@ -24,7 +24,6 @@ const (
 	maxElapsedTime        = 2 * time.Minute
 	attestationSocketPath = "/run/container_launcher/teeserver.sock"
 	attestationTokenURL   = "http://localhost/v1/intel/token"
-	dashboardNonce        = "eigenx-dashboard"
 )
 
 // AttestationTokenProvider interface for generating attestation tokens
@@ -180,7 +179,30 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 
 	// Generate a new JWT with empty nonce for user API upload
 	e.Logger.Info("Generating attestation token with empty nonce for user API")
-	uploadJWT, err := e.tokenProvider.GetToken(ctx, types.DashboardJWTAudience, dashboardNonce)
+
+	envVars := make(map[string]string)
+	if err := json.Unmarshal(envJSONBytes, &envVars); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal env JSON: %w", err)
+	}
+
+	// Derive one address to log
+	evmAddresses, solanaAddresses, err := crypto.DeriveAddressesFromMnemonic(envVars[types.MnemonicEnvVarName], types.NumAddressesToDerive)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive address for logging: %w", err)
+	}
+
+	addresses := types.AddressesResponseV1{
+		EVMAddresses:    evmAddresses,
+		SolanaAddresses: solanaAddresses,
+	}
+	addressBytes, err := json.Marshal(addresses)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal addresses for logging: %w", err)
+	}
+	e.Logger.Info("Derived addresses from mnemonic", "addresses", string(addressBytes))
+
+	addressesNonce := crypto.CalculateSignableDigest(crypto.AppDerivedAddressesHeader, addressBytes)
+	uploadJWT, err := e.tokenProvider.GetToken(ctx, types.DashboardJWTAudience, hex.EncodeToString(addressesNonce))
 	if err != nil {
 		e.Logger.Error("Failed to get attestation token for user API", "error", err)
 		// Not a fatal error - continue with returning environment variables

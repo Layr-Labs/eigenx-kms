@@ -403,7 +403,7 @@ func TestHandleAddresses_WalletIntegration(t *testing.T) {
 				var response map[string]string
 				err = json.Unmarshal(rec.Body.Bytes(), &response)
 				require.NoError(t, err)
-				require.Contains(t, response["error"], "Failed to create EVM wallet from mnemonic")
+				require.Contains(t, response["error"], "failed to create EVM wallet from mnemonic")
 			})
 		})
 	}

@@ -272,7 +272,7 @@ func getAndDecryptChainEnv(ctx context.Context, logger *slog.Logger, chainClient
 // combineEnvironments combines mnemonic, private env, and public env in order of precedence
 func combineEnvironments(mnemonic string, privateEnv, publicEnv types.Env) types.Env {
 	env := types.Env{}
-	env["MNEMONIC"] = mnemonic
+	env[types.MnemonicEnvVarName] = mnemonic
 	// add the private env (can override mnemonic)
 	for k, v := range privateEnv {
 		env[k] = v

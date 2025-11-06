@@ -6,6 +6,8 @@ import (
 
 const DashboardJWTAudience = "EigenX Dashboard"
 const KMSJWTAudience = "EigenX KMS"
+const MnemonicEnvVarName = "MNEMONIC"
+const NumAddressesToDerive = 5
 
 // generic type for signed responses
 type SignedResponse[T any] struct {
