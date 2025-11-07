@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 	"github.com/Layr-Labs/eigenx-kms/internal/kms"
 	"github.com/Layr-Labs/eigenx-kms/pkg/crypto"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
-	hdwallet "github.com/miguelmota/go-ethereum-hdwallet"
 
 	"github.com/labstack/echo/v4"
 )
@@ -50,34 +48,9 @@ func deriveAddressesFromRequest(c echo.Context, ctx context.Context, logger *slo
 	logger.Debug("Retrieved/generated mnemonic", "app_id", appID)
 
 	// Derive addresses from mnemonic
-	evmWallet, err := hdwallet.NewFromMnemonic(mnemonic)
+	evmAddresses, solanaAddresses, err := crypto.DeriveAddressesFromMnemonic(mnemonic, count)
 	if err != nil {
-		return "", nil, nil, newHTTPError(http.StatusInternalServerError, "Failed to create EVM wallet from mnemonic: %v", err)
-	}
-
-	evmAddresses := make([]types.EVMAddressAndDerivationPath, count)
-	solanaAddresses := make([]types.SolanaAddressAndDerivationPath, count)
-	for i := 0; i < count; i++ {
-		evmPath := fmt.Sprintf("m/44'/60'/0'/0/%d", i)
-		hdpath := hdwallet.MustParseDerivationPath(evmPath)
-		evmAccount, err := evmWallet.Derive(hdpath, false)
-		if err != nil {
-			return "", nil, nil, newHTTPError(http.StatusInternalServerError, "Failed to derive EVM address at index %d: %v", i, err)
-		}
-		solanaPath := fmt.Sprintf("m/44'/501'/%d'/0'", i)
-		solanaWallet, err := crypto.GenerateSolanaWalletFromMnemonicSeed(mnemonic, uint32(i))
-		if err != nil {
-			return "", nil, nil, newHTTPError(http.StatusInternalServerError, "Failed to derive Solana address at index %d: %v", i, err)
-		}
-
-		evmAddresses[i] = types.EVMAddressAndDerivationPath{
-			Address:        evmAccount.Address,
-			DerivationPath: evmPath,
-		}
-		solanaAddresses[i] = types.SolanaAddressAndDerivationPath{
-			Address:        solanaWallet.PublicKey().String(),
-			DerivationPath: solanaPath,
-		}
+		return "", nil, nil, newHTTPError(http.StatusInternalServerError, "Failed to derive addresses: %v", err)
 	}
 
 	logger.Debug("Derived addresses", "app_id", appID, "count", count)
