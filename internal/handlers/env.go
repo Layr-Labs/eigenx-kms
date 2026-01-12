@@ -240,7 +240,10 @@ func HandleEnvV3(c echo.Context, logger *slog.Logger, policyChecker policy.Polic
 		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Attestation verification failed: %v", err))
 	}
 
-	// Extract claims
+	// Extract claims with PCRs that identify the base image (platform-agnostic).
+	// PCR4: UEFI boot manager code
+	// PCR8: GRUB/kernel/modules command lines (includes dm-verity root hash)
+	// PCR9: files read by GRUB (grub.cfg, kernel)
 	claims, err := verified.ExtractClaims(teeverify.ExtractOptions{
 		PCRIndices: []uint32{4, 8, 9},
 	})
