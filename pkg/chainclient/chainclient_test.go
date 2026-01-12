@@ -38,7 +38,7 @@ func TestNewChainClient(t *testing.T) {
 			ComputeAVSRegistrar(gomock.Any()).
 			Return(common.HexToAddress("0x3333333333333333333333333333333333333333"), nil)
 
-		client, err := NewChainClient(logger, mockAppController)
+		client, err := NewChainClient(logger, mockAppController, nil)
 		require.NoError(t, err)
 		require.NotNil(t, client)
 	})
@@ -50,7 +50,7 @@ func TestNewChainClient(t *testing.T) {
 			ReleaseManager(gomock.Any()).
 			Return(common.Address{}, assert.AnError)
 
-		_, err := NewChainClient(logger, mockAppController)
+		_, err := NewChainClient(logger, mockAppController, nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "failed to fetch release manager")
 	})
@@ -66,7 +66,7 @@ func TestNewChainClient(t *testing.T) {
 			ComputeAVSRegistrar(gomock.Any()).
 			Return(common.Address{}, assert.AnError)
 
-		_, err := NewChainClient(logger, mockAppController)
+		_, err := NewChainClient(logger, mockAppController, nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "failed to fetch compute avs registrar")
 	})

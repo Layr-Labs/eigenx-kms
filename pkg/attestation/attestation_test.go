@@ -515,57 +515,6 @@ func TestDebugModeSkipsValidation(t *testing.T) {
 	})
 }
 
-// Test instance name parsing logic separately
-func TestInstanceNameParsing(t *testing.T) {
-	testCases := []struct {
-		name         string
-		instanceName string
-		expectedApp  string
-		expectError  bool
-	}{
-		{
-			name:         "simple instance name",
-			instanceName: "test-instance-app1",
-			expectedApp:  "app1",
-			expectError:  false,
-		},
-		{
-			name:         "complex instance name",
-			instanceName: "my-complex-instance-name-with-dashes-finalapp",
-			expectedApp:  "finalapp",
-			expectError:  false,
-		},
-		{
-			name:         "minimum valid parts",
-			instanceName: "prefix-app",
-			expectedApp:  "app",
-			expectError:  false,
-		},
-		{
-			name:         "invalid single part",
-			instanceName: "invalid",
-			expectError:  true,
-		},
-		{
-			name:         "empty string",
-			instanceName: "",
-			expectError:  true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			appID, err := extractAppIDFromInstanceName(tc.instanceName)
-			if tc.expectError {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, tc.expectedApp, appID)
-			}
-		})
-	}
-}
-
 func TestFilterIntelJWKS(t *testing.T) {
 	ctx := context.Background()
 	logger := setupLogger()

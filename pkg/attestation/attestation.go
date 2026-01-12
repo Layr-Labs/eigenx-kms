@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
+	"github.com/Layr-Labs/eigenx-kms/pkg/utils"
 	"github.com/lestrrat-go/httprc/v3"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jws"
@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	instanceNameDelimiter     = "-"
 	confidentialSpaceJWKURL   = "https://www.googleapis.com/service_accounts/v1/metadata/jwk/signer@confidentialspace-sign.iam.gserviceaccount.com"
 	intelTrustAuthorityJWKURL = "https://portal.trustauthority.intel.com/certs"
 	googleIssuer              = "https://confidentialcomputing.googleapis.com"
@@ -197,7 +196,7 @@ func (av *AttestationVerifier) VerifyAttestation(ctx context.Context, tokenStrin
 	}
 
 	// Extract app ID from instance name
-	appID, err := extractAppIDFromInstanceName(csToken.SubMods.GCE.InstanceName)
+	appID, err := utils.ExtractAppIDFromInstanceName(csToken.SubMods.GCE.InstanceName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract app ID from instance name: %w", err)
 	}
@@ -344,14 +343,6 @@ func (av *AttestationVerifier) validateConfidentialSpaceToken(csToken *Confident
 // validateIntelTrustAuthorityToken validates Intel Trust Authority token claims
 func (av *AttestationVerifier) validateIntelTrustAuthorityToken(csToken *ConfidentialSpaceToken) error {
 	return av.validateToken(csToken, intelValidationConfig)
-}
-
-func extractAppIDFromInstanceName(instanceName string) (string, error) {
-	instanceNameParts := strings.Split(instanceName, instanceNameDelimiter)
-	if len(instanceNameParts) < 2 {
-		return "", fmt.Errorf("invalid instance name: %s. Expected at least %d parts", instanceName, 2)
-	}
-	return instanceNameParts[len(instanceNameParts)-1], nil
 }
 
 func NewJWKCache(ctx context.Context, jwkUrl string, refreshInterval time.Duration) (jwk.Set, error) {

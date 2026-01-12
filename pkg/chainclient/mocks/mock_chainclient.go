@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
+	ImageAllowlist "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/ImageAllowlist"
 	types "github.com/Layr-Labs/eigenx-kms/pkg/types"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -56,4 +57,34 @@ func (m *MockChainClient) GetLatestRelease(ctx context.Context, appID string) ([
 func (mr *MockChainClientMockRecorder) GetLatestRelease(ctx, appID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLatestRelease", reflect.TypeOf((*MockChainClient)(nil).GetLatestRelease), ctx, appID)
+}
+
+// IsImageAllowed mocks base method.
+func (m *MockChainClient) IsImageAllowed(ctx context.Context, cvm uint8, pcrs []ImageAllowlist.IImageAllowlistPCR) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsImageAllowed", ctx, cvm, pcrs)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsImageAllowed indicates an expected call of IsImageAllowed.
+func (mr *MockChainClientMockRecorder) IsImageAllowed(ctx, cvm, pcrs any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsImageAllowed", reflect.TypeOf((*MockChainClient)(nil).IsImageAllowed), ctx, cvm, pcrs)
+}
+
+// IsTCBValid mocks base method.
+func (m *MockChainClient) IsTCBValid(ctx context.Context, cvm uint8, tcb uint64) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsTCBValid", ctx, cvm, tcb)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsTCBValid indicates an expected call of IsTCBValid.
+func (mr *MockChainClientMockRecorder) IsTCBValid(ctx, cvm, tcb any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsTCBValid", reflect.TypeOf((*MockChainClient)(nil).IsTCBValid), ctx, cvm, tcb)
 }

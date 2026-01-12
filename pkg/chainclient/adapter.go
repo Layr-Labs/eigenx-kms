@@ -2,12 +2,13 @@ package chainclient
 
 import (
 	appcontrollerV1 "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/AppController"
+	imageAllowlistV1 "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/ImageAllowlist"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// AppUpgradedIteratorAdapter adapts the generated iterator to our interface
+// AppUpgradedIteratorAdapter adapts the generated iterator to our interface.
 type AppUpgradedIteratorAdapter struct {
 	*appcontrollerV1.AppControllerAppUpgradedIterator
 }
@@ -20,11 +21,12 @@ func (a *AppUpgradedIteratorAdapter) Event() *appcontrollerV1.AppControllerAppUp
 	return a.AppControllerAppUpgradedIterator.Event
 }
 
-// AppControllerAdapter adapts the generated AppController to our interface
+// AppControllerAdapter adapts the generated AppController to our interface.
 type AppControllerAdapter struct {
 	*appcontrollerV1.AppController
 }
 
+// WrapAppController wraps the contract binding to implement the AppController interface.
 func WrapAppController(appController *appcontrollerV1.AppController) types.AppController {
 	return &AppControllerAdapter{AppController: appController}
 }
@@ -59,4 +61,22 @@ func (a *AppControllerAdapter) FilterAppUpgraded(opts *bind.FilterOpts, apps []c
 		return nil, err
 	}
 	return &AppUpgradedIteratorAdapter{iter}, nil
+}
+
+// ImageAllowlistAdapter adapts the generated ImageAllowlist to our interface.
+type ImageAllowlistAdapter struct {
+	*imageAllowlistV1.ImageAllowlist
+}
+
+// WrapImageAllowlist wraps the contract binding to implement the ImageAllowlist interface.
+func WrapImageAllowlist(imageAllowlist *imageAllowlistV1.ImageAllowlist) types.ImageAllowlist {
+	return &ImageAllowlistAdapter{ImageAllowlist: imageAllowlist}
+}
+
+func (a *ImageAllowlistAdapter) IsImageAllowed(opts *bind.CallOpts, cvm uint8, pcrs []imageAllowlistV1.IImageAllowlistPCR) (bool, error) {
+	return a.ImageAllowlist.IsImageAllowed(opts, cvm, pcrs)
+}
+
+func (a *ImageAllowlistAdapter) IsTCBValid(opts *bind.CallOpts, cvm uint8, tcb uint64) (bool, error) {
+	return a.ImageAllowlist.IsTCBValid(opts, cvm, tcb)
 }
