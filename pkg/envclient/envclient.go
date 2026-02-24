@@ -28,7 +28,7 @@ const (
 
 // AttestationProvider interface for generating raw attestation bytes
 type AttestationProvider interface {
-	GetAttestation(ctx context.Context, nonce []byte) ([]byte, error)
+	GetAttestation(ctx context.Context, challenge []byte) ([]byte, error)
 }
 
 // boundEvidenceRequest represents the request to the bound evidence endpoint
@@ -45,9 +45,9 @@ func NewBoundEvidenceProvider(logger *slog.Logger) *BoundEvidenceProvider {
 	return &BoundEvidenceProvider{logger: logger}
 }
 
-func (p *BoundEvidenceProvider) GetAttestation(ctx context.Context, nonce []byte) ([]byte, error) {
+func (p *BoundEvidenceProvider) GetAttestation(ctx context.Context, challenge []byte) ([]byte, error) {
 	reqBody, err := json.Marshal(boundEvidenceRequest{
-		Challenge: base64.StdEncoding.EncodeToString(nonce),
+		Challenge: base64.StdEncoding.EncodeToString(challenge),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal bound evidence request: %w", err)
@@ -119,10 +119,10 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 
 	e.Logger.Debug("RSA key pair generated", "public_key_length", len(rsaPublicKeyPEM))
 
-	// Calculate RSA key hash for nonce (raw bytes, not hex-encoded)
+	// Calculate RSA key hash for challenge
 	rsaKeyHash := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, rsaPublicKeyPEM)
 
-	// Request raw attestation with RSA key hash as nonce
+	// Request raw attestation with RSA key hash as challenge
 	e.Logger.Info("Requesting attestation")
 	attestationBytes, err := e.attestationProvider.GetAttestation(ctx, rsaKeyHash)
 	if err != nil {
