@@ -6,21 +6,20 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/Layr-Labs/eigenx-kms/internal/handlers"
 	"github.com/Layr-Labs/eigenx-kms/internal/kms/fakes"
-	"github.com/Layr-Labs/eigenx-kms/pkg/attestation"
-	attestationMocks "github.com/Layr-Labs/eigenx-kms/pkg/attestation/mocks"
 	chainClientMocks "github.com/Layr-Labs/eigenx-kms/pkg/chainclient/mocks"
 	"github.com/Layr-Labs/eigenx-kms/pkg/crypto"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
@@ -35,33 +34,17 @@ const (
 	testValidDigest = "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 )
 
-// mockAttestationTokenProvider is a mock implementation of AttestationTokenProvider for testing
-type mockAttestationTokenProvider struct {
-	baseToken string // Token template without nonce
-	err       error
+// mockAttestationProvider is a mock implementation of AttestationProvider for testing
+type mockAttestationProvider struct {
+	attestation []byte
+	err         error
 }
 
-func (m *mockAttestationTokenProvider) GetToken(ctx context.Context, audience, nonce string) (string, error) {
+func (m *mockAttestationProvider) GetAttestation(ctx context.Context, nonce []byte) ([]byte, error) {
 	if m.err != nil {
-		return "", m.err
+		return nil, m.err
 	}
-
-	// Parse the base token to add nonce
-	var claims map[string]interface{}
-	if err := json.Unmarshal([]byte(m.baseToken), &claims); err != nil {
-		return "", fmt.Errorf("failed to parse base token: %w", err)
-	}
-
-	// Add nonce to the claims
-	claims["eat_nonce"] = nonce
-
-	// Marshal back to JSON
-	tokenWithNonce, err := json.Marshal(claims)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal token with nonce: %w", err)
-	}
-
-	return string(tokenWithNonce), nil
+	return m.attestation, nil
 }
 
 // TestKMSServer represents a test KMS server setup
@@ -69,7 +52,6 @@ type TestKMSServer struct {
 	Server          *httptest.Server
 	UserAPIServer   *httptest.Server
 	FakeKMS         *fakes.FakeKMS
-	MockAttestation *attestationMocks.MockAttestationVerifierInterface
 	MockChainClient *chainClientMocks.MockChainClient
 	Logger          *slog.Logger
 	Ctrl            *gomock.Controller
@@ -85,18 +67,92 @@ func NewTestKMSServer(t *testing.T) *TestKMSServer {
 	fakeKMS, err := fakes.NewFakeKMS()
 	require.NoError(t, err)
 
-	mockAttestation := attestationMocks.NewMockAttestationVerifierInterface(ctrl)
 	mockChainClient := chainClientMocks.NewMockChainClient(ctrl)
 
 	e := echo.New()
-	e.POST("/env", func(c echo.Context) error {
-		return handlers.HandleEnv(c, logger, mockAttestation, mockChainClient, fakeKMS, true) // debug mode enabled
-	})
-	e.POST("/env/v2", func(c echo.Context) error {
-		return handlers.HandleEnvV2(c, logger, mockAttestation, mockChainClient, fakeKMS, true) // debug mode enabled
+	// v3 endpoint: inline handler that validates request and produces encrypted+signed response
+	e.POST("/env/v3", func(c echo.Context) error {
+		var envRequest types.EnvRequestV3
+		if err := c.Bind(&envRequest); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Failed to parse request: %v", err)})
+		}
+
+		// Validate RSA key size (must be 4096-bit)
+		if err := crypto.ValidateRSAKeySize([]byte(envRequest.RSAKeyPEM)); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("encryption key size mismatch: %v", err)})
+		}
+
+		// Validate attestation is valid base64
+		if _, err := base64.StdEncoding.DecodeString(envRequest.Attestation); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid attestation base64: %v", err)})
+		}
+
+		// Use mock chain client to get env data (using hardcoded test app ID)
+		_, publicEnv, encryptedEnvBytes, err := mockChainClient.GetLatestRelease(c.Request().Context(), testAppID)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("GetLatestRelease failed: %v", err)})
+		}
+
+		// Decrypt private env using fakeKMS
+		privateEnvBytes, err := crypto.DecryptWithRSAOAEPAndAES256GCM(fakeKMS, encryptedEnvBytes)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("decrypt failed: %v", err)})
+		}
+
+		var privateEnv types.Env
+		if err := json.Unmarshal(privateEnvBytes, &privateEnv); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("unmarshal failed: %v", err)})
+		}
+
+		// Get mnemonic
+		mnemonic, err := fakeKMS.DeriveMnemonic(c.Request().Context(), testAppID)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("mnemonic failed: %v", err)})
+		}
+
+		// Combine environments
+		env := types.Env{}
+		env[types.MnemonicEnvVarName] = mnemonic
+		for k, v := range privateEnv {
+			env[k] = v
+		}
+		for k, v := range publicEnv {
+			env[k] = v
+		}
+
+		// Encrypt with client's RSA key
+		envJSON, err := json.Marshal(env)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("marshal env failed: %v", err)})
+		}
+
+		encryptedEnvJSON, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM([]byte(envRequest.RSAKeyPEM), envJSON, nil)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("encrypt response failed: %v", err)})
+		}
+
+		envResponse := types.EnvResponseV3{
+			EncryptedCombinedEnv: string(encryptedEnvJSON),
+		}
+
+		// Sign the response
+		responseJSON, err := json.Marshal(envResponse)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("marshal response failed: %v", err)})
+		}
+
+		signature, err := fakeKMS.SignMessage(c.Request().Context(), string(responseJSON))
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("sign failed: %v", err)})
+		}
+
+		return c.JSON(http.StatusOK, types.SignedResponse[types.EnvResponseV3]{
+			Data:      envResponse,
+			Signature: signature,
+		})
 	})
 	e.GET("/health", func(c echo.Context) error {
-		return handlers.HandleHealth(c)
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
 
 	server := httptest.NewServer(e)
@@ -107,16 +163,6 @@ func NewTestKMSServer(t *testing.T) *TestKMSServer {
 	userAPIEcho.GET("/", func(c echo.Context) error {
 		return c.JSON(200, map[string]string{"status": "ok"})
 	})
-	userAPIEcho.POST("/attestation", func(c echo.Context) error {
-		var req map[string]string
-		if err := c.Bind(&req); err != nil {
-			return c.JSON(400, map[string]string{"error": "invalid request"})
-		}
-		if req["jwt"] == "" {
-			return c.JSON(400, map[string]string{"error": "missing jwt"})
-		}
-		return c.JSON(200, map[string]string{"status": "attestation received"})
-	})
 
 	userAPIServer := httptest.NewServer(userAPIEcho)
 	t.Cleanup(userAPIServer.Close)
@@ -125,7 +171,6 @@ func NewTestKMSServer(t *testing.T) *TestKMSServer {
 		Server:          server,
 		UserAPIServer:   userAPIServer,
 		FakeKMS:         fakeKMS,
-		MockAttestation: mockAttestation,
 		MockChainClient: mockChainClient,
 		Logger:          logger,
 		Ctrl:            ctrl,
@@ -149,31 +194,6 @@ func (ts *TestKMSServer) GetKMSKeys() (encryptionKey []byte, signingKey []byte, 
 
 // SetupSuccessfulMocks configures the test server for successful responses
 func (ts *TestKMSServer) SetupSuccessfulMocks(t *testing.T, appID string, privateEnv types.Env) {
-	// Setup attestation mock to extract nonce from JWT
-	ts.MockAttestation.EXPECT().
-		VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
-		DoAndReturn(func(ctx context.Context, jwtString string, provider attestation.AttestationProvider) (*attestation.AttestationClaims, error) {
-			// Parse the JWT to extract nonce
-			var claims map[string]interface{}
-			if err := json.Unmarshal([]byte(jwtString), &claims); err != nil {
-				return nil, fmt.Errorf("failed to parse JWT: %w", err)
-			}
-
-			// Extract nonce if present
-			var nonce string
-			if nonceRaw, ok := claims["eat_nonce"]; ok {
-				if nonceStr, ok := nonceRaw.(string); ok {
-					nonce = nonceStr
-				}
-			}
-
-			return &attestation.AttestationClaims{
-				ImageDigest: testValidDigest,
-				AppID:       appID,
-				Nonce:       nonce,
-			}, nil
-		})
-
 	// Setup chain client mock
 	hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
 	require.NoError(t, err)
@@ -210,14 +230,11 @@ func TestEnvClient_E2E_Success(t *testing.T) {
 	_, signingKey, err := testServer.GetKMSKeys()
 	require.NoError(t, err)
 
-	// Create a mock JWT
-	mockJWT := `{"sub":"test-app","iat":1234567890,"app_id":"` + testAppID + `"}`
-
-	// Create mock token provider
-	mockTokenProvider := &mockAttestationTokenProvider{baseToken: mockJWT}
+	// Create mock attestation provider returning dummy bytes
+	mockProvider := &mockAttestationProvider{attestation: []byte("dummy-attestation-bytes")}
 
 	// Create EnvClient
-	client := NewEnvClient(testServer.Logger, mockTokenProvider, signingKey, testServer.Server.URL, testServer.UserAPIServer.URL)
+	client := NewEnvClient(testServer.Logger, mockProvider, signingKey, testServer.Server.URL, testServer.UserAPIServer.URL)
 
 	// Test the GetEnv method
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -245,7 +262,6 @@ func TestEnvClient_E2E_InvalidSignature(t *testing.T) {
 	testServer := NewTestKMSServer(t)
 
 	// Generate a wrong signing key
-	// Generate ECDSA key for signing (P-256 curve)
 	wrongSigningECDSAKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	pubKeyBytes, err := x509.MarshalPKIXPublicKey(&wrongSigningECDSAKey.PublicKey)
@@ -259,9 +275,8 @@ func TestEnvClient_E2E_InvalidSignature(t *testing.T) {
 	privateEnv := types.Env{"SECRET_KEY": "test_secret"}
 	testServer.SetupSuccessfulMocks(t, testAppID, privateEnv)
 
-	mockJWT := `{"sub":"test-app","iat":1234567890,"app_id":"` + testAppID + `"}`
-	mockTokenProvider := &mockAttestationTokenProvider{baseToken: mockJWT}
-	client := NewEnvClient(testServer.Logger, mockTokenProvider, wrongSigningKey, testServer.Server.URL, testServer.UserAPIServer.URL)
+	mockProvider := &mockAttestationProvider{attestation: []byte("dummy-attestation-bytes")}
+	client := NewEnvClient(testServer.Logger, mockProvider, wrongSigningKey, testServer.Server.URL, testServer.UserAPIServer.URL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -279,9 +294,8 @@ func TestEnvClient_E2E_ServerDown(t *testing.T) {
 	_, signingKey, err := crypto.GenerateRSAKeyPair()
 	require.NoError(t, err)
 
-	mockJWT := `{"sub":"test-app","iat":1234567890,"app_id":"` + testAppID + `"}`
-	mockTokenProvider := &mockAttestationTokenProvider{baseToken: mockJWT}
-	client := NewEnvClient(logger, mockTokenProvider, []byte(signingKey), "http://localhost:99999", "http://localhost:99998") // non-existent servers
+	mockProvider := &mockAttestationProvider{attestation: []byte("dummy-attestation-bytes")}
+	client := NewEnvClient(logger, mockProvider, []byte(signingKey), "http://localhost:99999", "http://localhost:99998") // non-existent servers
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -306,21 +320,18 @@ func TestEnvClient_E2E_UserAPIDown(t *testing.T) {
 	_, signingKey, err := testServer.GetKMSKeys()
 	require.NoError(t, err)
 
-	// Create a mock JWT
-	mockJWT := `{"sub":"test-app","iat":1234567890,"app_id":"` + testAppID + `"}`
-
-	// Create mock token provider
-	mockTokenProvider := &mockAttestationTokenProvider{baseToken: mockJWT}
+	// Create mock attestation provider
+	mockProvider := &mockAttestationProvider{attestation: []byte("dummy-attestation-bytes")}
 
 	// Create EnvClient with non-existent user API URL
-	client := NewEnvClient(testServer.Logger, mockTokenProvider, signingKey, testServer.Server.URL, "http://localhost:99998")
+	// v3 doesn't upload to user API, so this should succeed regardless
+	client := NewEnvClient(testServer.Logger, mockProvider, signingKey, testServer.Server.URL, "http://localhost:99998")
 
-	// Test the GetEnv method - should succeed despite user API being down
+	// Test the GetEnv method - should succeed (v3 skips user API upload)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	envBytes, err := client.GetEnv(ctx)
-	// Should NOT error - user API failure is not fatal
 	require.NoError(t, err)
 	require.NotEmpty(t, envBytes)
 
