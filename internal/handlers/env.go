@@ -234,13 +234,19 @@ func HandleEnvV3(c echo.Context, logger *slog.Logger, policyChecker policy.Polic
 	// The attestation attests to a nonce derived from the RSA key
 	nonce := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, []byte(envRequest.RSAKeyPEM))
 
-	// Verify attestation
-	verified, err := teeverify.VerifyAttestation(attestationBytes, nonce)
+	// Parse attestation
+	attest, err := teeverify.ParseAttestation(attestationBytes)
 	if err != nil {
-		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Attestation verification failed: %v", err))
+		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Attestation parsing failed: %v", err))
 	}
 
-	// Extract claims with PCRs that identify the base image (platform-agnostic).
+	// TPM verification
+	verified, err := attest.VerifyTPM(nonce, nil)
+	if err != nil {
+		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("TPM verification failed: %v", err))
+	}
+
+	// Extract TPM claims with PCRs that identify the base image (platform-agnostic).
 	// PCR4: UEFI boot manager code
 	// PCR8: GRUB/kernel/modules command lines (includes dm-verity root hash)
 	// PCR9: files read by GRUB (grub.cfg, kernel)
@@ -265,7 +271,7 @@ func HandleEnvV3(c echo.Context, logger *slog.Logger, policyChecker policy.Polic
 		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Failed to extract app ID: %v", err))
 	}
 
-	logger.Debug("Attestation verified", "app_id", appID, "image_digest", claims.Container.ImageDigest, "platform", verified.Platform)
+	logger.Debug("Attestation verified", "app_id", appID, "image_digest", claims.Container.ImageDigest, "platform", attest.Platform())
 
 	// Add the ability to override the appID if in debug mode
 	debugAppID := strings.ToLower(c.QueryParam("appID"))
@@ -278,9 +284,26 @@ func HandleEnvV3(c echo.Context, logger *slog.Logger, policyChecker policy.Polic
 		}
 	}
 
-	// Check policies (debug mode, project ID, firmware, TCB, PCR allowlist)
-	if err := policyChecker.CheckPolicies(ctx, claims, verified.Platform); err != nil {
-		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Policy check failed: %v", err))
+	// TPM policy checks (hardened, project ID, PCR allowlist)
+	if err := policyChecker.CheckTPMPolicies(ctx, claims); err != nil {
+		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("TPM policy check failed: %v", err))
+	}
+
+	// TEE verification and policy checks (CVM platforms only)
+	if attest.Platform() != teeverify.PlatformGCPShieldedVM {
+		teeVerified, err := attest.VerifyBoundTEE(nonce, nil)
+		if err != nil {
+			return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("TEE verification failed: %v", err))
+		}
+
+		teeClaims, err := teeVerified.ExtractTEEClaims()
+		if err != nil {
+			return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Failed to extract TEE claims: %v", err))
+		}
+
+		if err := policyChecker.CheckTEEPolicies(ctx, teeClaims); err != nil {
+			return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("TEE policy check failed: %v", err))
+		}
 	}
 
 	logger.Debug("Policy checks passed", "app_id", appID)

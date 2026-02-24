@@ -95,10 +95,10 @@ github.com/KyleBanks/depth v1.2.1 h1:5h8fQADFrWtarTdtDudMmGsC7GPbOAu6RVB3ffsVFHc
 github.com/KyleBanks/depth v1.2.1/go.mod h1:jzSb9d0L43HxTQfT+oSA1EEp2q+ne2uh6XgeJcm8brE=
 github.com/Layr-Labs/eigenx-contracts v0.0.0-20260108140106-f5bb14dad664 h1:1OVw9TlYw2P/YfAOV5Ykxsc4+gk4NGu6KmKdNb62ntE=
 github.com/Layr-Labs/eigenx-contracts v0.0.0-20260108140106-f5bb14dad664/go.mod h1:fcLQZBQ4RpTXv3Kz4cO/raRxKrfWUC+r8hSB94pSKFc=
-github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260111230450-20f955e4341a h1:aWJ32aYmidOGnzfIhnL8VkzwUtHY/nts3agmlPPCOqs=
-github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260111230450-20f955e4341a/go.mod h1:d1hFQc8pLkx+slgf3phAHVRVc55MTk2iWz244oR30wU=
-github.com/Layr-Labs/go-tpm-tools/teeverify v0.0.0-20260111230450-20f955e4341a h1:xYlRyLR8wCwJ3TQAdb+MXo/6Wy4MWZjr0EoOf1qs9TI=
-github.com/Layr-Labs/go-tpm-tools/teeverify v0.0.0-20260111230450-20f955e4341a/go.mod h1:SpwAk14Pk4jg/47YtdpwHwWh7VQ+L6Kom7sXLqZrJz4=
+github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260224003021-08df993ee46d h1:CBdwhWz6b7VwvpNF97x1NGsDgxdCBmaZKFkGXzj1X5I=
+github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260224003021-08df993ee46d/go.mod h1:f9RkynScDma5kRoHhcX70ftr0+TY0U9laf71rjSBhao=
+github.com/Layr-Labs/go-tpm-tools/teeverify v0.0.0-20260224003021-08df993ee46d h1:RWuT413LeeaUvlrR68h2cc0iWeru8vVER036asrZbVc=
+github.com/Layr-Labs/go-tpm-tools/teeverify v0.0.0-20260224003021-08df993ee46d/go.mod h1:IJy/SYYwE2oRwJ/htkzz+tC+eS0taT6HZbn5U5pNLpE=
 github.com/Masterminds/goutils v1.1.0/go.mod h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=
 github.com/Masterminds/semver v1.4.2/go.mod h1:MB6lktGJrhw8PrUyiEoblNEGEQ+RzHPF078ddwwvV3Y=
 github.com/Masterminds/semver v1.5.0/go.mod h1:MB6lktGJrhw8PrUyiEoblNEGEQ+RzHPF078ddwwvV3Y=
@@ -466,8 +466,8 @@ github.com/google/certificate-transparency-go v1.1.2 h1:4hE0GEId6NAW28dFpC+LrRGw
 github.com/google/certificate-transparency-go v1.1.2/go.mod h1:3OL+HKDqHPUfdKrHVQxO6T8nDLO0HF7LRTlkIWXaWvQ=
 github.com/google/gce-tcb-verifier v0.3.1 h1:4L9YgkOtqC2U7cj4FofCUufHFCCpdD4Y0yPKI8UhOhI=
 github.com/google/gce-tcb-verifier v0.3.1/go.mod h1:GZCDLQxmEOCqUTL2BMB/zjo+hgXdUrR0Wgwz1OrwRYg=
-github.com/google/gce-tcb-verifier/gcetcbendorsement v0.0.0-20250301004354-d18ce1139be2 h1:YIKgTgpvaZzKUqRvuR2UOHKTFGkcjVJNqsiPJ34xYAE=
-github.com/google/gce-tcb-verifier/gcetcbendorsement v0.0.0-20250301004354-d18ce1139be2/go.mod h1:3timRtslAwP7Y/trlNQQ/pECZNZ39wV69igL41ngASs=
+github.com/google/gce-tcb-verifier/gcetcbendorsement v0.0.0-20251118221541-74582c078997 h1:98uXIBDKZ54UByu+mYc5CfqLzKRozTzwkBu+2cKMN8o=
+github.com/google/gce-tcb-verifier/gcetcbendorsement v0.0.0-20251118221541-74582c078997/go.mod h1:qUXEXOiSah5IT6vCudrydNAggMT8eyxqxmHsRBPYGWk=
 github.com/google/go-attestation v0.5.1 h1:jqtOrLk5MNdliTKjPbIPrAaRKJaKW+0LIU2n/brJYms=
 github.com/google/go-attestation v0.5.1/go.mod h1:KqGatdUhg5kPFkokyzSBDxwSCFyRgIgtRkMp6c3lOBQ=
 github.com/google/go-cmp v0.2.0/go.mod h1:oXzfMopK8JAjlY9xF4vHSVASa0yLyX7SntLO5aqRK0M=
@@ -493,8 +493,8 @@ github.com/google/go-licenses v0.0.0-20210329231322-ce1d9163b77d/go.mod h1:+TYOm
 github.com/google/go-querystring v1.0.0/go.mod h1:odCYkC5MyYFN7vkCjXpyrEuKhc/BUO6wN/zVPAxq5ck=
 github.com/google/go-replayers/grpcreplay v0.1.0/go.mod h1:8Ig2Idjpr6gifRd6pNVggX6TC1Zw6Jx74AKp7QNH2QE=
 github.com/google/go-replayers/httpreplay v0.1.0/go.mod h1:YKZViNhiGgqdBlUbI2MwGpq4pXxNmhJLPHQ7cv2b5no=
-github.com/google/go-sev-guest v0.14.0 h1:dCb4F3YrHTtrDX3cYIPTifEDz7XagZmXQioxRBW4wOo=
-github.com/google/go-sev-guest v0.14.0/go.mod h1:SK9vW+uyfuzYdVN0m8BShL3OQCtXZe/JPF7ZkpD3760=
+github.com/google/go-sev-guest v0.14.1 h1:j/DXy9jk1qSW/dEV9vDiQnhAVFD1zqnWNVu6p1J0Jgo=
+github.com/google/go-sev-guest v0.14.1/go.mod h1:SK9vW+uyfuzYdVN0m8BShL3OQCtXZe/JPF7ZkpD3760=
 github.com/google/go-tdx-guest v0.3.2-0.20241009005452-097ee70d0843 h1:+MoPobRN9HrDhGyn6HnF5NYo4uMBKaiFqAtf/D/OB4A=
 github.com/google/go-tdx-guest v0.3.2-0.20241009005452-097ee70d0843/go.mod h1:g/n8sKITIT9xRivBUbizo34DTsUm2nN2uU3A662h09g=
 github.com/google/go-tpm v0.9.6 h1:Ku42PT4LmjDu1H5C5ISWLlpI1mj+Zq7sPGKoRw2XROA=
@@ -598,6 +598,8 @@ github.com/hashicorp/go-version v1.2.0/go.mod h1:fltr4n8CU8Ke44wwGCBoEymUuxUHl09
 github.com/hashicorp/go.net v0.0.1/go.mod h1:hjKkEWcCURg++eb33jQU7oqQcI9XDCnUzHA0oac0k90=
 github.com/hashicorp/golang-lru v0.5.0/go.mod h1:/m3WP610KZHVQ1SGc6re/UDhFvYD7pJ4Ao+sR/qLZy8=
 github.com/hashicorp/golang-lru v0.5.1/go.mod h1:/m3WP610KZHVQ1SGc6re/UDhFvYD7pJ4Ao+sR/qLZy8=
+github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
+github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/hashicorp/hcl v1.0.0/go.mod h1:E5yfLk+7swimpb2L/Alb/PJmXilQ/rhwaUYs4T20WEQ=
 github.com/hashicorp/logutils v1.0.0/go.mod h1:QIAnNjmIWmVIIkWDTG1z5v++HQmx9WQRO+LraFDTW64=
 github.com/hashicorp/mdns v1.0.0/go.mod h1:tL+uN++7HEJ6SQLQ2/p+z2pH24WQKWjBPkE0mNTz8vQ=
