@@ -6,7 +6,7 @@ toolchain go1.24.2
 
 require (
 	cloud.google.com/go/kms v1.23.0
-	github.com/Layr-Labs/eigenx-contracts v0.0.0-20260108140106-f5bb14dad664
+	github.com/Layr-Labs/eigenx-contracts v0.0.0-20260223155637-6137f1b215df
 	github.com/Layr-Labs/go-tpm-tools/teeverify v0.0.0-20260224003021-08df993ee46d
 	github.com/cenkalti/backoff/v5 v5.0.0
 	github.com/ethereum/go-ethereum v1.16.2

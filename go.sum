@@ -95,6 +95,8 @@ github.com/KyleBanks/depth v1.2.1 h1:5h8fQADFrWtarTdtDudMmGsC7GPbOAu6RVB3ffsVFHc
 github.com/KyleBanks/depth v1.2.1/go.mod h1:jzSb9d0L43HxTQfT+oSA1EEp2q+ne2uh6XgeJcm8brE=
 github.com/Layr-Labs/eigenx-contracts v0.0.0-20260108140106-f5bb14dad664 h1:1OVw9TlYw2P/YfAOV5Ykxsc4+gk4NGu6KmKdNb62ntE=
 github.com/Layr-Labs/eigenx-contracts v0.0.0-20260108140106-f5bb14dad664/go.mod h1:fcLQZBQ4RpTXv3Kz4cO/raRxKrfWUC+r8hSB94pSKFc=
+github.com/Layr-Labs/eigenx-contracts v0.0.0-20260223155637-6137f1b215df h1:hh+hdEUEeUOwfUwTpWN3Uh44um8g/C/WTz6uncVbtdQ=
+github.com/Layr-Labs/eigenx-contracts v0.0.0-20260223155637-6137f1b215df/go.mod h1:fcLQZBQ4RpTXv3Kz4cO/raRxKrfWUC+r8hSB94pSKFc=
 github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260224003021-08df993ee46d h1:CBdwhWz6b7VwvpNF97x1NGsDgxdCBmaZKFkGXzj1X5I=
 github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260224003021-08df993ee46d/go.mod h1:f9RkynScDma5kRoHhcX70ftr0+TY0U9laf71rjSBhao=
 github.com/Layr-Labs/go-tpm-tools/teeverify v0.0.0-20260224003021-08df993ee46d h1:RWuT413LeeaUvlrR68h2cc0iWeru8vVER036asrZbVc=
