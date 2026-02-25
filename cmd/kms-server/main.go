@@ -114,6 +114,8 @@ func runServer(c *cli.Context) error {
 		return fmt.Errorf("failed to initialize KMS client: %w", err)
 	}
 
+	attestationEvidenceVerifier := attestation.NewBoundAttestationEvidenceVerifier()
+
 	// Initialize Echo router
 	e := echo.New()
 	// set this to extract the client's IP directly from the request
@@ -148,7 +150,7 @@ func runServer(c *cli.Context) error {
 
 	// env v3 endpoint with rate limiting (self-verification)
 	e.POST("/env/v3", func(c echo.Context) error {
-		return handlers.HandleEnvV3(c, cfg.Logger, policyChecker, chainClient, kmsClient, cfg.Debug)
+		return handlers.HandleEnvV3(c, cfg.Logger, attestationEvidenceVerifier, policyChecker, chainClient, kmsClient, cfg.Debug)
 	}, middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(cfg.EnvRateLimit))))
 
 	// Swagger endpoint

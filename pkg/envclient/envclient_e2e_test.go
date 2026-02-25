@@ -6,23 +6,25 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"fmt"
 	"log/slog"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Layr-Labs/eigenx-kms/internal/handlers"
 	"github.com/Layr-Labs/eigenx-kms/internal/kms/fakes"
+	"github.com/Layr-Labs/eigenx-kms/pkg/attestation"
+	attestationMocks "github.com/Layr-Labs/eigenx-kms/pkg/attestation/mocks"
 	chainClientMocks "github.com/Layr-Labs/eigenx-kms/pkg/chainclient/mocks"
 	"github.com/Layr-Labs/eigenx-kms/pkg/crypto"
+	policyMocks "github.com/Layr-Labs/eigenx-kms/pkg/policy/mocks"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
+	"github.com/Layr-Labs/go-tpm-tools/teeverify"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -49,12 +51,14 @@ func (m *mockAttestationProvider) GetAttestation(ctx context.Context, challenge 
 
 // TestKMSServer represents a test KMS server setup
 type TestKMSServer struct {
-	Server          *httptest.Server
-	UserAPIServer   *httptest.Server
-	FakeKMS         *fakes.FakeKMS
-	MockChainClient *chainClientMocks.MockChainClient
-	Logger          *slog.Logger
-	Ctrl            *gomock.Controller
+	Server                  *httptest.Server
+	UserAPIServer           *httptest.Server
+	FakeKMS                 *fakes.FakeKMS
+	MockChainClient         *chainClientMocks.MockChainClient
+	MockAttestationVerifier *attestationMocks.MockBoundAttestationEvidenceVerifier
+	MockPolicyChecker       *policyMocks.MockPolicyCheckerInterface
+	Logger                  *slog.Logger
+	Ctrl                    *gomock.Controller
 }
 
 // NewTestKMSServer creates a new test KMS server with all mocked dependencies
@@ -68,91 +72,15 @@ func NewTestKMSServer(t *testing.T) *TestKMSServer {
 	require.NoError(t, err)
 
 	mockChainClient := chainClientMocks.NewMockChainClient(ctrl)
+	mockAttestationVerifier := attestationMocks.NewMockBoundAttestationEvidenceVerifier(ctrl)
+	mockPolicyChecker := policyMocks.NewMockPolicyCheckerInterface(ctrl)
 
 	e := echo.New()
-	// v3 endpoint: inline handler that validates request and produces encrypted+signed response
 	e.POST("/env/v3", func(c echo.Context) error {
-		var envRequest types.EnvRequestV3
-		if err := c.Bind(&envRequest); err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Failed to parse request: %v", err)})
-		}
-
-		// Validate RSA key size (must be 4096-bit)
-		if err := crypto.ValidateRSAKeySize([]byte(envRequest.RSAKeyPEM)); err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("encryption key size mismatch: %v", err)})
-		}
-
-		// Validate attestation is valid base64
-		if _, err := base64.StdEncoding.DecodeString(envRequest.Attestation); err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid attestation base64: %v", err)})
-		}
-
-		// Use mock chain client to get env data (using hardcoded test app ID)
-		_, publicEnv, encryptedEnvBytes, err := mockChainClient.GetLatestRelease(c.Request().Context(), testAppID)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("GetLatestRelease failed: %v", err)})
-		}
-
-		// Decrypt private env using fakeKMS
-		privateEnvBytes, err := crypto.DecryptWithRSAOAEPAndAES256GCM(fakeKMS, encryptedEnvBytes)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("decrypt failed: %v", err)})
-		}
-
-		var privateEnv types.Env
-		if err := json.Unmarshal(privateEnvBytes, &privateEnv); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("unmarshal failed: %v", err)})
-		}
-
-		// Get mnemonic
-		mnemonic, err := fakeKMS.DeriveMnemonic(c.Request().Context(), testAppID)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("mnemonic failed: %v", err)})
-		}
-
-		// Combine environments
-		env := types.Env{}
-		env[types.MnemonicEnvVarName] = mnemonic
-		for k, v := range privateEnv {
-			env[k] = v
-		}
-		for k, v := range publicEnv {
-			env[k] = v
-		}
-
-		// Encrypt with client's RSA key
-		envJSON, err := json.Marshal(env)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("marshal env failed: %v", err)})
-		}
-
-		encryptedEnvJSON, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM([]byte(envRequest.RSAKeyPEM), envJSON, nil)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("encrypt response failed: %v", err)})
-		}
-
-		envResponse := types.EnvResponseV3{
-			EncryptedCombinedEnv: string(encryptedEnvJSON),
-		}
-
-		// Sign the response
-		responseJSON, err := json.Marshal(envResponse)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("marshal response failed: %v", err)})
-		}
-
-		signature, err := fakeKMS.SignMessage(c.Request().Context(), string(responseJSON))
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("sign failed: %v", err)})
-		}
-
-		return c.JSON(http.StatusOK, types.SignedResponse[types.EnvResponseV3]{
-			Data:      envResponse,
-			Signature: signature,
-		})
+		return handlers.HandleEnvV3(c, logger, mockAttestationVerifier, mockPolicyChecker, mockChainClient, fakeKMS, false)
 	})
 	e.GET("/health", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+		return c.JSON(200, map[string]string{"status": "ok"})
 	})
 
 	server := httptest.NewServer(e)
@@ -168,12 +96,14 @@ func NewTestKMSServer(t *testing.T) *TestKMSServer {
 	t.Cleanup(userAPIServer.Close)
 
 	return &TestKMSServer{
-		Server:          server,
-		UserAPIServer:   userAPIServer,
-		FakeKMS:         fakeKMS,
-		MockChainClient: mockChainClient,
-		Logger:          logger,
-		Ctrl:            ctrl,
+		Server:                  server,
+		UserAPIServer:           userAPIServer,
+		FakeKMS:                 fakeKMS,
+		MockChainClient:         mockChainClient,
+		MockAttestationVerifier: mockAttestationVerifier,
+		MockPolicyChecker:       mockPolicyChecker,
+		Logger:                  logger,
+		Ctrl:                    ctrl,
 	}
 }
 
@@ -213,6 +143,20 @@ func (ts *TestKMSServer) SetupSuccessfulMocks(t *testing.T, appID string, privat
 	ts.MockChainClient.EXPECT().
 		GetLatestRelease(gomock.Any(), appID).
 		Return(expectedDigest, publicEnv, []byte(encryptedPrivateEnv), nil)
+
+	// Mock verifier returns GCP Shielded VM claims for this appID
+	ts.MockAttestationVerifier.EXPECT().
+		Verify(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&attestation.VerifiedAttestation{
+			TPMClaims: &teeverify.TPMClaims{
+				GCE:       &teeverify.GCEInfo{InstanceName: "app-" + appID, ProjectID: "test"},
+				Container: &teeverify.ContainerInfo{ImageDigest: testValidDigest},
+			},
+		}, nil)
+
+	ts.MockPolicyChecker.EXPECT().
+		CheckTPMPolicies(gomock.Any(), gomock.Any()).
+		Return(nil)
 }
 
 func TestEnvClient_E2E_Success(t *testing.T) {
