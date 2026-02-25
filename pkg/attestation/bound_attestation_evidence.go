@@ -9,6 +9,12 @@ import (
 	"github.com/Layr-Labs/go-tpm-tools/sdk/attest"
 )
 
+var machineTypeSuffixToPlatform = map[byte]attest.Platform{
+	't': attest.PlatformIntelTDX,
+	's': attest.PlatformAMDSevSnp,
+	'v': attest.PlatformGCPShieldedVM,
+}
+
 // VerifiedAttestation holds the claims extracted from a verified raw TPM attestation.
 // TEEClaims is nil for GCP Shielded VM (no TEE binding on that platform).
 // Container is nil when the attestation has no canonical event log.
@@ -17,6 +23,27 @@ type VerifiedAttestation struct {
 	TEEClaims *attest.TEEClaims
 	Container *attest.ContainerInfo
 	Platform  attest.Platform
+}
+
+// VerifyPlatform checks that the machine type suffix matches this attestation's platform.
+// An empty machine type defaults to TDX for legacy deployments.
+func (v *VerifiedAttestation) VerifyPlatform(machineType string) error {
+	if machineType == "" {
+		if v.Platform != attest.PlatformIntelTDX {
+			return fmt.Errorf("platform mismatch: empty machine type defaults to %s but attestation is %s",
+				attest.PlatformIntelTDX.PlatformTag(), v.Platform.PlatformTag())
+		}
+		return nil
+	}
+	expected, ok := machineTypeSuffixToPlatform[machineType[len(machineType)-1]]
+	if !ok {
+		return fmt.Errorf("unknown machine type suffix in %s", machineType)
+	}
+	if expected != v.Platform {
+		return fmt.Errorf("platform mismatch: %s indicates %s but attestation is %s",
+			machineType, expected.PlatformTag(), v.Platform.PlatformTag())
+	}
+	return nil
 }
 
 // BoundAttestationEvidenceVerifier verifies raw bound attestation evidence against a
