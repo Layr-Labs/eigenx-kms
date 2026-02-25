@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,7 +15,9 @@ import (
 	"github.com/Layr-Labs/eigenx-kms/pkg/attestation"
 	"github.com/Layr-Labs/eigenx-kms/pkg/chainclient"
 	"github.com/Layr-Labs/eigenx-kms/pkg/crypto"
+	"github.com/Layr-Labs/eigenx-kms/pkg/policy"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
+	"github.com/Layr-Labs/eigenx-kms/pkg/utils"
 	"github.com/lestrrat-go/jwx/v3/jwe"
 
 	"github.com/labstack/echo/v4"
@@ -183,6 +186,125 @@ func HandleEnvV2(c echo.Context, logger *slog.Logger, attestationVerifier attest
 	}
 
 	logger.Debug("Retrieved/generated mnemonic", "app_id", claims.AppID)
+
+	// Combine environments
+	env := combineEnvironments(mnemonic, privateEnv, publicEnv)
+
+	// Encrypt and sign response
+	return encryptAndSignResponse(c, logger, kmsClient, env, []byte(envRequest.RSAKeyPEM))
+}
+
+// HandleEnvV3 godoc
+//
+//	@Summary		Get environment variables (V3)
+//	@Description	Retrieve encrypted environment variables using self-verified raw attestation
+//	@Tags			environment
+//	@Accept			json
+//	@Produce		json
+//	@Param			data	    body		types.EnvRequestV3	true	"Raw attestation + RSA public key"
+//	@Param			appID		query		string				false	"App ID override (debug mode only)"
+//	@Success		200			{object}	types.SignedResponse[types.EnvResponseV3]
+//	@Failure		400			{object}	map[string]string
+//	@Failure		401			{object}	map[string]string
+//	@Failure		500			{object}	map[string]string
+//	@Router			/env/v3 [post]
+func HandleEnvV3(c echo.Context, logger *slog.Logger, attestationVerifier attestation.BoundAttestationEvidenceVerifier, policyChecker policy.PolicyCheckerInterface, chainClient chainclient.ChainClient, kmsClient kms.KMSClient, debugMode bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// Parse request body
+	var envRequest types.EnvRequestV3
+	if err := c.Bind(&envRequest); err != nil {
+		return returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("Failed to parse env request v3: %v", err))
+	}
+
+	logger.Debug("Received v3 request", "attestation_length", len(envRequest.Attestation), "rsa_key_length", len(envRequest.RSAKeyPEM))
+
+	// Validate RSA key size (must be 4096-bit)
+	if err := crypto.ValidateRSAKeySize([]byte(envRequest.RSAKeyPEM)); err != nil {
+		return returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("encryption key size mismatch: %v", err))
+	}
+
+	attestationBytes, err := base64.StdEncoding.DecodeString(envRequest.Attestation)
+	if err != nil {
+		return returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("Failed to decode attestation: %v", err))
+	}
+
+	// The attestation is bound to a challenge derived from the RSA key
+	challenge := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, []byte(envRequest.RSAKeyPEM))
+
+	result, err := attestationVerifier.Verify(ctx, attestationBytes, challenge)
+	if err != nil {
+		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Attestation verification failed: %v", err))
+	}
+
+	// Validate required claims
+	if result.TPMClaims.GCE == nil {
+		return returnError(c, logger, http.StatusUnauthorized, "GCE instance info not found in attestation")
+	}
+	if result.Container == nil {
+		return returnError(c, logger, http.StatusUnauthorized, "Container info not found in attestation")
+	}
+
+	// Extract app ID from instance name
+	appID, err := utils.ExtractAppIDFromInstanceName(result.TPMClaims.GCE.InstanceName)
+	if err != nil {
+		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Failed to extract app ID: %v", err))
+	}
+
+	logger.Debug("Attestation verified", "app_id", appID, "image_digest", result.Container.ImageDigest)
+
+	// Add the ability to override the appID if in debug mode
+	debugAppID := strings.ToLower(c.QueryParam("appID"))
+	if debugAppID != "" {
+		if debugMode {
+			appID = debugAppID
+			logger.Debug("Debug mode override", "app_id", appID)
+		} else {
+			return returnError(c, logger, http.StatusBadRequest, "appID query parameter is only allowed in debug mode")
+		}
+	}
+
+	// TPM policy checks (hardened, project ID, PCR allowlist)
+	if err := policyChecker.CheckTPMPolicies(ctx, result.TPMClaims); err != nil {
+		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("TPM policy check failed: %v", err))
+	}
+
+	// TEE policy checks (CVM platforms only — nil for GCP Shielded VM)
+	if result.TEEClaims != nil {
+		if err := policyChecker.CheckTEEPolicies(ctx, result.TEEClaims); err != nil {
+			return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("TEE policy check failed: %v", err))
+		}
+	}
+
+	logger.Debug("Policy checks passed", "app_id", appID)
+
+	baseClaims := &attestation.AttestationClaims{
+		AppID:       appID,
+		ImageDigest: result.Container.ImageDigest,
+	}
+
+	// Get and decrypt chain environment
+	privateEnv, publicEnv, err := getAndDecryptChainEnv(ctx, logger, chainClient, kmsClient, baseClaims)
+	if err != nil {
+		if httpErr, ok := err.(*httpError); ok {
+			return returnError(c, logger, httpErr.statusCode, httpErr.message)
+		}
+		return returnError(c, logger, http.StatusInternalServerError, err.Error())
+	}
+
+	// Validate platform matches attestation
+	if err := result.VerifyPlatform(publicEnv[types.MachineTypeEnvVarName]); err != nil {
+		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Platform validation failed: %v", err))
+	}
+
+	// Get or generate app mnemonic (KMS encrypted)
+	mnemonic, err := kmsClient.DeriveMnemonic(ctx, appID)
+	if err != nil {
+		return returnError(c, logger, http.StatusInternalServerError, fmt.Sprintf("Failed to get/generate mnemonic: %v", err))
+	}
+
+	logger.Debug("Retrieved/generated mnemonic", "app_id", appID)
 
 	// Combine environments
 	env := combineEnvironments(mnemonic, privateEnv, publicEnv)

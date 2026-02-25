@@ -13,11 +13,13 @@ import (
 	"time"
 
 	appcontrollerV1 "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/AppController"
+	"github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/ImageAllowlist"
 	"github.com/Layr-Labs/eigenx-kms/internal/handlers"
 	"github.com/Layr-Labs/eigenx-kms/internal/kms"
 	"github.com/Layr-Labs/eigenx-kms/internal/utils"
 	"github.com/Layr-Labs/eigenx-kms/pkg/attestation"
 	"github.com/Layr-Labs/eigenx-kms/pkg/chainclient"
+	"github.com/Layr-Labs/eigenx-kms/pkg/policy"
 	_ "github.com/Layr-Labs/eigenx-kms/pkg/types"
 	_ "github.com/Layr-Labs/eigenx-kms/swagger"
 	"github.com/ethereum/go-ethereum/common"
@@ -48,6 +50,7 @@ func main() {
 			utils.KMSSigningKeyNameFlag,
 			utils.RPCURLFlag,
 			utils.AppControllerAddressFlag,
+			utils.ImageAllowlistAddressFlag,
 		},
 		Action: runServer,
 	}
@@ -82,10 +85,22 @@ func runServer(c *cli.Context) error {
 		return fmt.Errorf("failed to initialize app controller: %w", err)
 	}
 
-	chainClient, err := chainclient.NewChainClient(cfg.Logger, chainclient.WrapAppController(appController))
+	imageAllowlist, err := ImageAllowlist.NewImageAllowlist(common.HexToAddress(cfg.ImageAllowlistAddress), ethClient)
+	if err != nil {
+		return fmt.Errorf("failed to initialize image allowlist: %w", err)
+	}
+
+	chainClient, err := chainclient.NewChainClient(cfg.Logger, chainclient.WrapAppController(appController), chainclient.WrapImageAllowlist(imageAllowlist))
 	if err != nil {
 		return fmt.Errorf("failed to initialize chain client: %w", err)
 	}
+
+	policyChecker := policy.NewPolicyChecker(
+		cfg.Logger,
+		cfg.AttestationProjectID,
+		chainClient,
+		cfg.Debug,
+	)
 
 	kmsClient, err := kms.NewGcpKmsClient(ctx, cfg.Logger, kms.GcpKmsClientConfig{
 		ProjectID:       cfg.ProjectID,
@@ -98,6 +113,8 @@ func runServer(c *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize KMS client: %w", err)
 	}
+
+	attestationEvidenceVerifier := attestation.NewBoundAttestationEvidenceVerifier()
 
 	// Initialize Echo router
 	e := echo.New()
@@ -129,6 +146,11 @@ func runServer(c *cli.Context) error {
 	// env v2 endpoint with rate limiting
 	e.POST("/env/v2", func(c echo.Context) error {
 		return handlers.HandleEnvV2(c, cfg.Logger, attestationVerifier, chainClient, kmsClient, cfg.Debug)
+	}, middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(cfg.EnvRateLimit))))
+
+	// env v3 endpoint with rate limiting (self-verification)
+	e.POST("/env/v3", func(c echo.Context) error {
+		return handlers.HandleEnvV3(c, cfg.Logger, attestationEvidenceVerifier, policyChecker, chainClient, kmsClient, cfg.Debug)
 	}, middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(cfg.EnvRateLimit))))
 
 	// Swagger endpoint

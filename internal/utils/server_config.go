@@ -25,39 +25,41 @@ func GetLogLevel(level string) slog.Level {
 }
 
 type ServerConfig struct {
-	Port                 string       `json:"port"`
-	LogLevel             string       `json:"log_level"`
-	Debug                bool         `json:"debug"`
-	APIKey               string       `json:"api_key"`
-	EnvRateLimit         float64      `json:"env_rate_limit"`
-	ProjectID            string       `json:"project_id"`
-	AttestationProjectID string       `json:"attestation_project_id"`
-	KMSLocation          string       `json:"kms_location"`
-	KMSKeyRing           string       `json:"kms_key_ring"`
-	KMSHmacKeyName       string       `json:"kms_hmac_key_name"`
-	KMSEncryptionKeyName string       `json:"kms_encryption_key_name"`
-	KMSSigningKeyName    string       `json:"kms_signing_key_name"`
-	RPCURL               string       `json:"rpc_url"`
-	AppControllerAddress string       `json:"app_controller_address"`
-	Logger               *slog.Logger `json:"-"`
+	Port                  string       `json:"port"`
+	LogLevel              string       `json:"log_level"`
+	Debug                 bool         `json:"debug"`
+	APIKey                string       `json:"api_key"`
+	EnvRateLimit          float64      `json:"env_rate_limit"`
+	ProjectID             string       `json:"project_id"`
+	AttestationProjectID  string       `json:"attestation_project_id"`
+	KMSLocation           string       `json:"kms_location"`
+	KMSKeyRing            string       `json:"kms_key_ring"`
+	KMSHmacKeyName        string       `json:"kms_hmac_key_name"`
+	KMSEncryptionKeyName  string       `json:"kms_encryption_key_name"`
+	KMSSigningKeyName     string       `json:"kms_signing_key_name"`
+	RPCURL                string       `json:"rpc_url"`
+	AppControllerAddress  string       `json:"app_controller_address"`
+	ImageAllowlistAddress string       `json:"image_allowlist_address"`
+	Logger                *slog.Logger `json:"-"`
 }
 
 func NewServerConfigFromCLI(c *cli.Context) (*ServerConfig, error) {
 	config := &ServerConfig{
-		Port:                 c.String(PortFlag.Name),
-		LogLevel:             c.String(LogLevelFlag.Name),
-		Debug:                c.Bool(DebugFlag.Name),
-		APIKey:               c.String(APIKeyFlag.Name),
-		EnvRateLimit:         c.Float64(EnvRateLimitFlag.Name),
-		ProjectID:            c.String(ProjectIDFlag.Name),
-		AttestationProjectID: c.String(AttestationProjectIDFlag.Name),
-		KMSLocation:          c.String(KMSLocationFlag.Name),
-		KMSKeyRing:           c.String(KMSKeyRingFlag.Name),
-		KMSHmacKeyName:       c.String(KMSHmacKeyNameFlag.Name),
-		KMSEncryptionKeyName: c.String(KMSEncryptionKeyNameFlag.Name),
-		KMSSigningKeyName:    c.String(KMSSigningKeyNameFlag.Name),
-		RPCURL:               c.String(RPCURLFlag.Name),
-		AppControllerAddress: c.String(AppControllerAddressFlag.Name),
+		Port:                  c.String(PortFlag.Name),
+		LogLevel:              c.String(LogLevelFlag.Name),
+		Debug:                 c.Bool(DebugFlag.Name),
+		APIKey:                c.String(APIKeyFlag.Name),
+		EnvRateLimit:          c.Float64(EnvRateLimitFlag.Name),
+		ProjectID:             c.String(ProjectIDFlag.Name),
+		AttestationProjectID:  c.String(AttestationProjectIDFlag.Name),
+		KMSLocation:           c.String(KMSLocationFlag.Name),
+		KMSKeyRing:            c.String(KMSKeyRingFlag.Name),
+		KMSHmacKeyName:        c.String(KMSHmacKeyNameFlag.Name),
+		KMSEncryptionKeyName:  c.String(KMSEncryptionKeyNameFlag.Name),
+		KMSSigningKeyName:     c.String(KMSSigningKeyNameFlag.Name),
+		RPCURL:                c.String(RPCURLFlag.Name),
+		AppControllerAddress:  c.String(AppControllerAddressFlag.Name),
+		ImageAllowlistAddress: c.String(ImageAllowlistAddressFlag.Name),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -80,6 +82,7 @@ func NewServerConfigFromCLI(c *cli.Context) (*ServerConfig, error) {
 		"kms_signing_key_name", config.KMSSigningKeyName,
 		"rpc_url", config.RPCURL,
 		"app_controller_address", config.AppControllerAddress,
+		"image_allowlist_address", config.ImageAllowlistAddress,
 	)
 
 	return config, nil

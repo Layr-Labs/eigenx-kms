@@ -7,6 +7,7 @@ import (
 const DashboardJWTAudience = "EigenX Dashboard"
 const KMSJWTAudience = "EigenX KMS"
 const MnemonicEnvVarName = "MNEMONIC"
+const MachineTypeEnvVarName = "EIGEN_MACHINE_TYPE_PUBLIC"
 const NumAddressesToDerive = 5
 
 // generic type for signed responses
@@ -24,6 +25,15 @@ type EnvRequestV2 struct {
 	RSAKeyPEM             string `json:"rsaKey"`
 }
 
+// EnvRequestV3 represents a V3 request with raw attestation bytes (self-verified)
+type EnvRequestV3 struct {
+	// Attestation is base64-encoded raw attestation protobuf bytes.
+	// The attestation's report data contains a hash of the RSA key, binding them together.
+	Attestation string `json:"attestation"`
+	// RSAKeyPEM is the RSA public key in PEM format, attested via the nonce in the attestation.
+	RSAKeyPEM string `json:"rsaKey"`
+}
+
 type Env map[string]string
 
 type EnvResponseV1 struct {
@@ -31,6 +41,9 @@ type EnvResponseV1 struct {
 }
 
 type EnvResponseV2 = EnvResponseV1
+
+// EnvResponseV3 is identical to V1/V2 response
+type EnvResponseV3 = EnvResponseV1
 
 type EVMAddressAndDerivationPath struct {
 	Address        common.Address `json:"address" swaggertype:"string" example:"0x1234567890abcdef1234567890abcdef12345678"`

@@ -101,6 +101,13 @@ var (
 		Required: true,
 	}
 
+	ImageAllowlistAddressFlag = &cli.StringFlag{
+		Name:     "image-allowlist-address",
+		Usage:    "ImageAllowlist contract address",
+		EnvVars:  []string{"IMAGE_ALLOWLIST_ADDRESS"},
+		Required: true,
+	}
+
 	KMSServerURLFlag = &cli.StringFlag{
 		Name:     "kms-server-url",
 		Usage:    "KMS server URL",
