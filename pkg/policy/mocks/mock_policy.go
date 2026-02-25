@@ -14,7 +14,7 @@ import (
 	reflect "reflect"
 
 	ImageAllowlist "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/ImageAllowlist"
-	teeverify "github.com/Layr-Labs/go-tpm-tools/teeverify"
+	attest "github.com/Layr-Labs/go-tpm-tools/sdk/attest"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -96,16 +96,30 @@ func (m *MockPolicyCheckerInterface) EXPECT() *MockPolicyCheckerInterfaceMockRec
 	return m.recorder
 }
 
-// CheckPolicies mocks base method.
-func (m *MockPolicyCheckerInterface) CheckPolicies(ctx context.Context, claims *teeverify.Claims, platform teeverify.Platform) error {
+// CheckTEEPolicies mocks base method.
+func (m *MockPolicyCheckerInterface) CheckTEEPolicies(ctx context.Context, teeClaims *attest.TEEClaims) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CheckPolicies", ctx, claims, platform)
+	ret := m.ctrl.Call(m, "CheckTEEPolicies", ctx, teeClaims)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// CheckPolicies indicates an expected call of CheckPolicies.
-func (mr *MockPolicyCheckerInterfaceMockRecorder) CheckPolicies(ctx, claims, platform any) *gomock.Call {
+// CheckTEEPolicies indicates an expected call of CheckTEEPolicies.
+func (mr *MockPolicyCheckerInterfaceMockRecorder) CheckTEEPolicies(ctx, teeClaims any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckPolicies", reflect.TypeOf((*MockPolicyCheckerInterface)(nil).CheckPolicies), ctx, claims, platform)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckTEEPolicies", reflect.TypeOf((*MockPolicyCheckerInterface)(nil).CheckTEEPolicies), ctx, teeClaims)
+}
+
+// CheckTPMPolicies mocks base method.
+func (m *MockPolicyCheckerInterface) CheckTPMPolicies(ctx context.Context, claims *attest.TPMClaims) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckTPMPolicies", ctx, claims)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CheckTPMPolicies indicates an expected call of CheckTPMPolicies.
+func (mr *MockPolicyCheckerInterfaceMockRecorder) CheckTPMPolicies(ctx, claims any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckTPMPolicies", reflect.TypeOf((*MockPolicyCheckerInterface)(nil).CheckTPMPolicies), ctx, claims)
 }

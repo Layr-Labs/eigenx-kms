@@ -18,7 +18,7 @@ import (
 	"github.com/Layr-Labs/eigenx-kms/pkg/policy"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
 	"github.com/Layr-Labs/eigenx-kms/pkg/utils"
-	"github.com/Layr-Labs/go-tpm-tools/teeverify"
+	"github.com/Layr-Labs/go-tpm-tools/sdk/attest"
 	"github.com/lestrrat-go/jwx/v3/jwe"
 
 	"github.com/labstack/echo/v4"
@@ -209,7 +209,7 @@ func HandleEnvV2(c echo.Context, logger *slog.Logger, attestationVerifier attest
 //	@Failure		401			{object}	map[string]string
 //	@Failure		500			{object}	map[string]string
 //	@Router			/env/v3 [post]
-func HandleEnvV3(c echo.Context, logger *slog.Logger, policyChecker policy.PolicyCheckerInterface, chainClient chainclient.ChainClient, kmsClient kms.KMSClient, debugMode bool) error {
+func HandleEnvV3(c echo.Context, logger *slog.Logger, attestationVerifier attestation.BoundAttestationEvidenceVerifier, policyChecker policy.PolicyCheckerInterface, chainClient chainclient.ChainClient, kmsClient kms.KMSClient, debugMode bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -231,41 +231,29 @@ func HandleEnvV3(c echo.Context, logger *slog.Logger, policyChecker policy.Polic
 		return returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("Failed to decode attestation: %v", err))
 	}
 
-	// The attestation attests to a nonce derived from the RSA key
-	nonce := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, []byte(envRequest.RSAKeyPEM))
+	// The attestation is bound to a challenge derived from the RSA key
+	challenge := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, []byte(envRequest.RSAKeyPEM))
 
-	// Verify attestation
-	verified, err := teeverify.VerifyAttestation(attestationBytes, nonce)
+	result, err := attestationVerifier.Verify(ctx, attestationBytes, challenge)
 	if err != nil {
 		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Attestation verification failed: %v", err))
 	}
 
-	// Extract claims with PCRs that identify the base image (platform-agnostic).
-	// PCR4: UEFI boot manager code
-	// PCR8: GRUB/kernel/modules command lines (includes dm-verity root hash)
-	// PCR9: files read by GRUB (grub.cfg, kernel)
-	claims, err := verified.ExtractClaims(teeverify.ExtractOptions{
-		PCRIndices: []uint32{4, 8, 9},
-	})
-	if err != nil {
-		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Failed to extract claims: %v", err))
-	}
-
 	// Validate required claims
-	if claims.GCE == nil {
+	if result.TPMClaims.GCE == nil {
 		return returnError(c, logger, http.StatusUnauthorized, "GCE instance info not found in attestation")
 	}
-	if claims.Container == nil {
+	if result.Container == nil {
 		return returnError(c, logger, http.StatusUnauthorized, "Container info not found in attestation")
 	}
 
 	// Extract app ID from instance name
-	appID, err := utils.ExtractAppIDFromInstanceName(claims.GCE.InstanceName)
+	appID, err := utils.ExtractAppIDFromInstanceName(result.TPMClaims.GCE.InstanceName)
 	if err != nil {
 		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Failed to extract app ID: %v", err))
 	}
 
-	logger.Debug("Attestation verified", "app_id", appID, "image_digest", claims.Container.ImageDigest, "platform", verified.Platform)
+	logger.Debug("Attestation verified", "app_id", appID, "image_digest", result.Container.ImageDigest)
 
 	// Add the ability to override the appID if in debug mode
 	debugAppID := strings.ToLower(c.QueryParam("appID"))
@@ -278,16 +266,23 @@ func HandleEnvV3(c echo.Context, logger *slog.Logger, policyChecker policy.Polic
 		}
 	}
 
-	// Check policies (debug mode, project ID, firmware, TCB, PCR allowlist)
-	if err := policyChecker.CheckPolicies(ctx, claims, verified.Platform); err != nil {
-		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Policy check failed: %v", err))
+	// TPM policy checks (hardened, project ID, PCR allowlist)
+	if err := policyChecker.CheckTPMPolicies(ctx, result.TPMClaims); err != nil {
+		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("TPM policy check failed: %v", err))
+	}
+
+	// TEE policy checks (CVM platforms only — nil for GCP Shielded VM)
+	if result.TEEClaims != nil {
+		if err := policyChecker.CheckTEEPolicies(ctx, result.TEEClaims); err != nil {
+			return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("TEE policy check failed: %v", err))
+		}
 	}
 
 	logger.Debug("Policy checks passed", "app_id", appID)
 
 	baseClaims := &attestation.AttestationClaims{
 		AppID:       appID,
-		ImageDigest: claims.Container.ImageDigest,
+		ImageDigest: result.Container.ImageDigest,
 	}
 
 	// Get and decrypt chain environment
@@ -297,6 +292,11 @@ func HandleEnvV3(c echo.Context, logger *slog.Logger, policyChecker policy.Polic
 			return returnError(c, logger, httpErr.statusCode, httpErr.message)
 		}
 		return returnError(c, logger, http.StatusInternalServerError, err.Error())
+	}
+
+	// Validate platform matches attestation
+	if err := validatePlatform(publicEnv, result.Platform); err != nil {
+		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Platform validation failed: %v", err))
 	}
 
 	// Get or generate app mnemonic (KMS encrypted)
@@ -328,6 +328,25 @@ func checkRSAKeyAttestation(claims *attestation.AttestationClaims, expectedRSAKe
 		return fmt.Errorf("RSA key attestation mismatch: expected hash %s, got %s", expectedHash, claims.Nonce)
 	}
 
+	return nil
+}
+
+// validatePlatform checks that EIGEN_PLATFORM_PUBLIC in publicEnv matches the
+// attested hardware platform. Backwards-compatible: TDX deployments may omit it.
+func validatePlatform(publicEnv types.Env, attestedPlatform attest.Platform) error {
+	declared := publicEnv[types.PlatformEnvVarName]
+	expected := attestedPlatform.PlatformTag()
+
+	if declared == "" {
+		if attestedPlatform != attest.PlatformIntelTDX {
+			return fmt.Errorf("%s is required for %s platform", types.PlatformEnvVarName, expected)
+		}
+		return nil
+	}
+
+	if declared != expected {
+		return fmt.Errorf("platform mismatch: %s declares %s but attestation is %s", types.PlatformEnvVarName, declared, expected)
+	}
 	return nil
 }
 

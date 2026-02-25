@@ -50,10 +50,10 @@ func runClient(c *cli.Context) error {
 		return fmt.Errorf("failed to read KMS signing key: %w", err)
 	}
 
-	// Create attestation token provider
-	tokenProvider := envclient.NewConfidentialSpaceTokenProvider(cfg.Logger)
+	// Create attestation provider
+	attestationProvider := envclient.NewBoundEvidenceProvider(cfg.Logger)
 
-	envClient := envclient.NewEnvClient(cfg.Logger, tokenProvider, kmsSigningKeyBytes, cfg.ServerURL, cfg.UserAPIURL)
+	envClient := envclient.NewEnvClient(cfg.Logger, attestationProvider, kmsSigningKeyBytes, cfg.ServerURL, cfg.UserAPIURL)
 	envJSONBytes, err := envClient.GetEnv(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get env: %w", err)

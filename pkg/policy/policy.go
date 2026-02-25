@@ -9,7 +9,7 @@ import (
 	"sort"
 
 	"github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/ImageAllowlist"
-	"github.com/Layr-Labs/go-tpm-tools/teeverify"
+	"github.com/Layr-Labs/go-tpm-tools/sdk/attest"
 )
 
 // ImageAllowlistChecker defines the interface for checking image allowlist and TCB.
@@ -20,7 +20,8 @@ type ImageAllowlistChecker interface {
 
 // PolicyCheckerInterface defines the interface for policy checking.
 type PolicyCheckerInterface interface {
-	CheckPolicies(ctx context.Context, claims *teeverify.Claims, platform teeverify.Platform) error
+	CheckTPMPolicies(ctx context.Context, claims *attest.TPMClaims) error
+	CheckTEEPolicies(ctx context.Context, teeClaims *attest.TEEClaims) error
 }
 
 // PolicyChecker implements policy checking for TEE attestations.
@@ -46,12 +47,13 @@ func NewPolicyChecker(
 	}
 }
 
-// CheckPolicies verifies that the claims meet all policy requirements.
-func (pc *PolicyChecker) CheckPolicies(ctx context.Context, claims *teeverify.Claims, platform teeverify.Platform) error {
-	// Debug mode rejection
-	if err := pc.checkDebugMode(claims, platform); err != nil {
-		return err
+// CheckTPMPolicies verifies that the TPM claims meet all policy requirements.
+func (pc *PolicyChecker) CheckTPMPolicies(ctx context.Context, claims *attest.TPMClaims) error {
+	// Hardened check: reject non-hardened unless debugMode
+	if !pc.debugMode && !claims.Hardened {
+		return fmt.Errorf("non-hardened Confidential Space image - rejecting")
 	}
+	pc.logger.Debug("Hardened check passed")
 
 	// Project ID validation
 	if claims.GCE == nil {
@@ -62,20 +64,8 @@ func (pc *PolicyChecker) CheckPolicies(ctx context.Context, claims *teeverify.Cl
 	}
 	pc.logger.Debug("Project ID validated", "project_id", claims.GCE.ProjectID)
 
-	// Firmware endorsement verification
-	if err := pc.verifyFirmware(ctx, claims, platform); err != nil {
-		return fmt.Errorf("firmware verification failed: %w", err)
-	}
-	pc.logger.Debug("Firmware endorsement verified")
-
-	// TCB version check (on-chain)
-	if err := pc.checkTCB(ctx, claims, platform); err != nil {
-		return fmt.Errorf("TCB check failed: %w", err)
-	}
-	pc.logger.Debug("TCB version validated")
-
 	// PCR allowlist check (on-chain)
-	if err := pc.checkPCRAllowlist(ctx, claims, platform); err != nil {
+	if err := pc.checkPCRAllowlist(ctx, claims); err != nil {
 		return fmt.Errorf("PCR allowlist check failed: %w", err)
 	}
 	pc.logger.Debug("PCR allowlist validated")
@@ -83,76 +73,92 @@ func (pc *PolicyChecker) CheckPolicies(ctx context.Context, claims *teeverify.Cl
 	return nil
 }
 
-// checkDebugMode rejects debug mode VMs and non-hardened images unless debugMode is enabled.
-func (pc *PolicyChecker) checkDebugMode(claims *teeverify.Claims, platform teeverify.Platform) error {
+// CheckTEEPolicies verifies that the TEE claims meet all policy requirements.
+func (pc *PolicyChecker) CheckTEEPolicies(ctx context.Context, teeClaims *attest.TEEClaims) error {
+	// TEE debug mode check
+	if err := pc.checkTEEDebugMode(teeClaims); err != nil {
+		return err
+	}
+
+	// Firmware endorsement verification
+	if err := pc.verifyFirmware(ctx, teeClaims); err != nil {
+		return fmt.Errorf("firmware verification failed: %w", err)
+	}
+	pc.logger.Debug("Firmware endorsement verified")
+
+	// TCB version check (on-chain)
+	if err := pc.checkTCB(ctx, teeClaims); err != nil {
+		return fmt.Errorf("TCB check failed: %w", err)
+	}
+	pc.logger.Debug("TCB version validated")
+
+	return nil
+}
+
+// checkTEEDebugMode rejects TEE debug mode VMs unless debugMode is enabled.
+func (pc *PolicyChecker) checkTEEDebugMode(teeClaims *attest.TEEClaims) error {
 	if pc.debugMode {
-		pc.logger.Debug("Debug mode enabled, skipping debug mode rejection")
+		pc.logger.Debug("Debug mode enabled, skipping TEE debug mode rejection")
 		return nil
 	}
 
-	// Reject debug Confidential Space images
-	if !claims.Hardened {
-		return fmt.Errorf("non-hardened Confidential Space image - rejecting")
-	}
-
-	// Check TEE debug flags
-	switch platform {
-	case teeverify.PlatformTDX:
-		if claims.TDX != nil && claims.TDX.Attributes.Debug {
+	switch teeClaims.Platform {
+	case attest.PlatformIntelTDX:
+		if teeClaims.TDX != nil && teeClaims.TDX.Attributes.Debug {
 			return fmt.Errorf("TD is in DEBUG mode - rejecting")
 		}
-	case teeverify.PlatformSevSnp:
-		if claims.SevSnp != nil && claims.SevSnp.Policy.Debug {
+	case attest.PlatformAMDSevSnp:
+		if teeClaims.SevSnp != nil && teeClaims.SevSnp.Policy.Debug {
 			return fmt.Errorf("guest is in DEBUG mode - rejecting")
 		}
 	}
 
-	pc.logger.Debug("Debug mode check passed")
+	pc.logger.Debug("TEE debug mode check passed")
 	return nil
 }
 
 // verifyFirmware verifies the firmware measurement against Google's endorsements.
-func (pc *PolicyChecker) verifyFirmware(ctx context.Context, claims *teeverify.Claims, platform teeverify.Platform) error {
-	switch platform {
-	case teeverify.PlatformTDX:
-		if claims.TDX == nil {
+func (pc *PolicyChecker) verifyFirmware(ctx context.Context, teeClaims *attest.TEEClaims) error {
+	switch teeClaims.Platform {
+	case attest.PlatformIntelTDX:
+		if teeClaims.TDX == nil {
 			return fmt.Errorf("TDX claims missing for TDX platform")
 		}
-		_, err := teeverify.VerifyMRTD(ctx, claims.TDX.MRTD[:])
+		_, err := attest.VerifyMRTD(ctx, teeClaims.TDX.MRTD[:])
 		return err
-	case teeverify.PlatformSevSnp:
-		if claims.SevSnp == nil {
+	case attest.PlatformAMDSevSnp:
+		if teeClaims.SevSnp == nil {
 			return fmt.Errorf("SEV-SNP claims missing for SEV-SNP platform")
 		}
-		_, err := teeverify.VerifySevSnpMeasurement(ctx, claims.SevSnp.Measurement[:])
+		_, err := attest.VerifySevSnpMeasurement(ctx, teeClaims.SevSnp.Measurement[:])
 		return err
 	default:
-		return fmt.Errorf("unknown platform: %d", platform)
+		return fmt.Errorf("unknown platform: %d", teeClaims.Platform)
 	}
 }
 
 // checkTCB verifies the TCB version against the on-chain minimum.
-func (pc *PolicyChecker) checkTCB(ctx context.Context, claims *teeverify.Claims, platform teeverify.Platform) error {
-	cvm := uint8(platform)
+func (pc *PolicyChecker) checkTCB(ctx context.Context, teeClaims *attest.TEEClaims) error {
+	cvm := uint8(teeClaims.Platform)
 	var tcb uint64
 
-	switch platform {
-	case teeverify.PlatformTDX:
-		if claims.TDX == nil {
+	switch teeClaims.Platform {
+	case attest.PlatformIntelTDX:
+		if teeClaims.TDX == nil {
 			return fmt.Errorf("TDX claims missing for TCB check")
 		}
 		// Pack TCB from TeeTcbSvn: major<<16 | minor<<8 | microcode
-		major := uint64(claims.TDX.TeeTcbSvn[1])
-		minor := uint64(claims.TDX.TeeTcbSvn[0])
-		microcode := uint64(claims.TDX.TeeTcbSvn[2])
+		major := uint64(teeClaims.TDX.TeeTcbSvn[1])
+		minor := uint64(teeClaims.TDX.TeeTcbSvn[0])
+		microcode := uint64(teeClaims.TDX.TeeTcbSvn[2])
 		tcb = major<<16 | minor<<8 | microcode
-	case teeverify.PlatformSevSnp:
-		if claims.SevSnp == nil {
+	case attest.PlatformAMDSevSnp:
+		if teeClaims.SevSnp == nil {
 			return fmt.Errorf("SEV-SNP claims missing for TCB check")
 		}
-		tcb = claims.SevSnp.CurrentTcb
+		tcb = teeClaims.SevSnp.CurrentTcb
 	default:
-		return fmt.Errorf("unknown platform: %d", platform)
+		return fmt.Errorf("unknown platform: %d", teeClaims.Platform)
 	}
 
 	valid, err := pc.imageAllowlistChecker.IsTCBValid(ctx, cvm, tcb)
@@ -167,8 +173,8 @@ func (pc *PolicyChecker) checkTCB(ctx context.Context, claims *teeverify.Claims,
 }
 
 // checkPCRAllowlist verifies the PCRs against the on-chain allowlist.
-func (pc *PolicyChecker) checkPCRAllowlist(ctx context.Context, claims *teeverify.Claims, platform teeverify.Platform) error {
-	cvm := uint8(platform)
+func (pc *PolicyChecker) checkPCRAllowlist(ctx context.Context, claims *attest.TPMClaims) error {
+	cvm := uint8(claims.Platform)
 	pcrs := pcrMapToContractPCRs(claims.PCRs)
 
 	allowed, err := pc.imageAllowlistChecker.IsImageAllowed(ctx, cvm, pcrs)

@@ -6,8 +6,9 @@ toolchain go1.24.2
 
 require (
 	cloud.google.com/go/kms v1.23.0
-	github.com/Layr-Labs/eigenx-contracts v0.0.0-20260108140106-f5bb14dad664
-	github.com/Layr-Labs/go-tpm-tools/teeverify v0.0.0-20260111230450-20f955e4341a
+	github.com/Layr-Labs/eigenx-contracts v0.0.0-20260223155637-6137f1b215df
+	github.com/Layr-Labs/go-tpm-tools/sdk/attest v0.0.0-20260224231618-3df231bf0b04
+	github.com/Layr-Labs/go-tpm-tools/teeverify v0.0.0-20260224003021-08df993ee46d
 	github.com/cenkalti/backoff/v5 v5.0.0
 	github.com/ethereum/go-ethereum v1.16.2
 	github.com/gagliardetto/solana-go v1.13.0
@@ -26,7 +27,7 @@ require (
 	google.golang.org/protobuf v1.36.10
 )
 
-require golang.org/x/exp v0.0.0-20240409090435-93d18d7e34b8 // indirect
+require golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56 // indirect
 
 require (
 	cloud.google.com/go v0.123.0 // indirect
@@ -37,7 +38,7 @@ require (
 	cloud.google.com/go/longrunning v0.7.0 // indirect
 	filippo.io/edwards25519 v1.0.0-rc.1 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
-	github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260111230450-20f955e4341a // indirect
+	github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260224231618-3df231bf0b04 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
@@ -74,11 +75,11 @@ require (
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/google/certificate-transparency-go v1.1.2 // indirect
 	github.com/google/gce-tcb-verifier v0.3.1 // indirect
-	github.com/google/gce-tcb-verifier/gcetcbendorsement v0.0.0-20250301004354-d18ce1139be2 // indirect
+	github.com/google/gce-tcb-verifier/gcetcbendorsement v0.0.0-20251118221541-74582c078997 // indirect
 	github.com/google/go-attestation v0.5.1 // indirect
 	github.com/google/go-configfs-tsm v0.3.3 // indirect
 	github.com/google/go-eventlog v0.0.2-0.20241003021507-01bb555f7cba // indirect
-	github.com/google/go-sev-guest v0.14.0 // indirect
+	github.com/google/go-sev-guest v0.14.1 // indirect
 	github.com/google/go-tdx-guest v0.3.2-0.20241009005452-097ee70d0843 // indirect
 	github.com/google/go-tpm v0.9.6 // indirect
 	github.com/google/go-tpm-tools v0.4.4 // indirect
@@ -89,6 +90,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.7 // indirect
 	github.com/googleapis/gax-go/v2 v2.15.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
