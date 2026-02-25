@@ -185,13 +185,13 @@ func (ts *envTestSetupV3) setupSuccessfulChainClientWithPublicEnv(t *testing.T, 
 }
 
 // setupSuccessfulChainClient configures the chain client mock for successful V3 responses
-// with a default publicEnv containing GCP_SHIELDED_VM platform.
+// with a default publicEnv containing a Shielded VM machine type.
 func (ts *envTestSetupV3) setupSuccessfulChainClient(t *testing.T, appID string, privateEnvData types.Env) {
 	t.Helper()
 	publicEnv := types.Env{
-		"PUBLIC_VAR":               "public_value",
-		"NODE_ENV":                 "production",
-		types.PlatformEnvVarName: "GCP_SHIELDED_VM",
+		"PUBLIC_VAR":                "public_value",
+		"NODE_ENV":                  "production",
+		types.MachineTypeEnvVarName: "g1-micro-1v",
 	}
 	ts.setupSuccessfulChainClientWithPublicEnv(t, appID, privateEnvData, publicEnv)
 }
@@ -423,9 +423,9 @@ func TestHandleEnvV3_CVMSuccess(t *testing.T) {
 
 	privateEnv := types.Env{"SECRET_KEY": "secret_value"}
 	publicEnv := types.Env{
-		"PUBLIC_VAR":               "public_value",
-		"NODE_ENV":                 "production",
-		types.PlatformEnvVarName: "INTEL_TDX",
+		"PUBLIC_VAR":                "public_value",
+		"NODE_ENV":                  "production",
+		types.MachineTypeEnvVarName: "g1-standard-4t",
 	}
 	ts.setupSuccessfulChainClientWithPublicEnv(t, testEnvAppID, privateEnv, publicEnv)
 
@@ -443,7 +443,7 @@ func TestHandleEnvV3_PlatformMismatch(t *testing.T) {
 	logger := setupEnvLogger()
 	ts := setupEnvTestV3(t)
 
-	// Attested as TDX but publicEnv declares AMD_SEV_SNP
+	// Attested as TDX but machine type suffix 's' implies SEV-SNP
 	ts.Verifier.result = &attestation.VerifiedAttestation{
 		TPMClaims: &attest.TPMClaims{
 			GCE: &attest.GCEInfo{InstanceName: "app-" + testEnvAppID, ProjectID: "test-project"},
@@ -462,9 +462,9 @@ func TestHandleEnvV3_PlatformMismatch(t *testing.T) {
 
 	privateEnv := types.Env{"SECRET_KEY": "secret_value"}
 	publicEnv := types.Env{
-		"PUBLIC_VAR":               "public_value",
-		"NODE_ENV":                 "production",
-		types.PlatformEnvVarName: "AMD_SEV_SNP",
+		"PUBLIC_VAR":                "public_value",
+		"NODE_ENV":                  "production",
+		types.MachineTypeEnvVarName: "g1-standard-2s",
 	}
 	ts.setupSuccessfulChainClientWithPublicEnv(t, testEnvAppID, privateEnv, publicEnv)
 
@@ -478,22 +478,21 @@ func TestHandleEnvV3_PlatformMismatch(t *testing.T) {
 	requireErrorResponse(t, rec, "Platform validation failed")
 }
 
-func TestHandleEnvV3_PlatformMissing_NonTDX(t *testing.T) {
+func TestHandleEnvV3_MissingMachineType(t *testing.T) {
 	logger := setupEnvLogger()
 	ts := setupEnvTestV3(t)
 
-	// Attested as GCP Shielded VM but publicEnv omits EIGEN_PLATFORM_PUBLIC
 	ts.Verifier.result = gcpTPMClaims(testEnvAppID, testValidDigest)
 
 	ts.MockPolicy.EXPECT().
 		CheckTPMPolicies(gomock.Any(), gomock.Any()).
 		Return(nil)
 
+	// Public env has no EIGEN_MACHINE_TYPE_PUBLIC
 	privateEnv := types.Env{"SECRET_KEY": "secret_value"}
 	publicEnv := types.Env{
 		"PUBLIC_VAR": "public_value",
 		"NODE_ENV":   "production",
-		// No EIGEN_PLATFORM_PUBLIC
 	}
 	ts.setupSuccessfulChainClientWithPublicEnv(t, testEnvAppID, privateEnv, publicEnv)
 
@@ -504,84 +503,72 @@ func TestHandleEnvV3_PlatformMissing_NonTDX(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
-	requireErrorResponse(t, rec, "Platform validation failed")
-}
-
-func TestHandleEnvV3_PlatformMissing_TDX(t *testing.T) {
-	logger := setupEnvLogger()
-	ts := setupEnvTestV3(t)
-
-	// Attested as TDX with no EIGEN_PLATFORM_PUBLIC — backwards compatible, should succeed
-	ts.Verifier.result = &attestation.VerifiedAttestation{
-		TPMClaims: &attest.TPMClaims{
-			GCE: &attest.GCEInfo{InstanceName: "app-" + testEnvAppID, ProjectID: "test-project"},
-		},
-		Container: &attest.ContainerInfo{ImageDigest: testValidDigest},
-		TEEClaims: &attest.TEEClaims{},
-		Platform:  attest.PlatformIntelTDX,
-	}
-
-	ts.MockPolicy.EXPECT().
-		CheckTPMPolicies(gomock.Any(), gomock.Any()).
-		Return(nil)
-	ts.MockPolicy.EXPECT().
-		CheckTEEPolicies(gomock.Any(), gomock.Any()).
-		Return(nil)
-
-	privateEnv := types.Env{"SECRET_KEY": "secret_value"}
-	publicEnv := types.Env{
-		"PUBLIC_VAR": "public_value",
-		"NODE_ENV":   "production",
-		// No EIGEN_PLATFORM_PUBLIC — backwards compat for TDX
-	}
-	ts.setupSuccessfulChainClientWithPublicEnv(t, testEnvAppID, privateEnv, publicEnv)
-
-	requestBody, _ := json.Marshal(ts.EnvRequestV3)
-	c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v3", requestBody)
-
-	err := HandleEnvV3(c, logger, ts.Verifier, ts.MockPolicy, ts.MockChainClient, ts.FakeKMS, false)
-
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, rec.Code)
+	// Missing machine type defaults to TDX, which mismatches GCP Shielded VM attestation
+	requireErrorResponse(t, rec, "platform mismatch")
 }
 
 func TestValidatePlatform(t *testing.T) {
-	t.Run("matching platform", func(t *testing.T) {
-		env := types.Env{types.PlatformEnvVarName: "INTEL_TDX"}
-		err := validatePlatform(env, attest.PlatformIntelTDX)
-		require.NoError(t, err)
-	})
+	tests := []struct {
+		name              string
+		machineType       string
+		attestedPlatform  attest.Platform
+		expectErr         bool
+		expectErrContains string
+	}{
+		{
+			name:             "TDX suffix matches TDX attestation",
+			machineType:      "g1-standard-4t",
+			attestedPlatform: attest.PlatformIntelTDX,
+		},
+		{
+			name:             "SEV-SNP suffix matches SEV-SNP attestation",
+			machineType:      "g1-standard-2s",
+			attestedPlatform: attest.PlatformAMDSevSnp,
+		},
+		{
+			name:             "Shielded VM suffix matches Shielded VM attestation",
+			machineType:      "g1-micro-1v",
+			attestedPlatform: attest.PlatformGCPShieldedVM,
+		},
+		{
+			name:              "TDX suffix but SEV-SNP attestation",
+			machineType:       "g1-standard-4t",
+			attestedPlatform:  attest.PlatformAMDSevSnp,
+			expectErr:         true,
+			expectErrContains: "platform mismatch",
+		},
+		{
+			name:             "missing machine type defaults to TDX",
+			machineType:      "",
+			attestedPlatform: attest.PlatformIntelTDX,
+		},
+		{
+			name:              "missing machine type mismatches non-TDX",
+			machineType:       "",
+			attestedPlatform:  attest.PlatformGCPShieldedVM,
+			expectErr:         true,
+			expectErrContains: "platform mismatch",
+		},
+		{
+			name:              "unknown suffix",
+			machineType:       "g1-standard-4x",
+			attestedPlatform:  attest.PlatformIntelTDX,
+			expectErr:         true,
+			expectErrContains: "unknown machine type suffix",
+		},
+	}
 
-	t.Run("matching GCP Shielded VM", func(t *testing.T) {
-		env := types.Env{types.PlatformEnvVarName: "GCP_SHIELDED_VM"}
-		err := validatePlatform(env, attest.PlatformGCPShieldedVM)
-		require.NoError(t, err)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			va := &attestation.VerifiedAttestation{Platform: tt.attestedPlatform}
+			err := va.VerifyPlatform(tt.machineType)
 
-	t.Run("mismatched platform", func(t *testing.T) {
-		env := types.Env{types.PlatformEnvVarName: "AMD_SEV_SNP"}
-		err := validatePlatform(env, attest.PlatformIntelTDX)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "platform mismatch")
-	})
-
-	t.Run("missing platform TDX backwards compat", func(t *testing.T) {
-		env := types.Env{}
-		err := validatePlatform(env, attest.PlatformIntelTDX)
-		require.NoError(t, err)
-	})
-
-	t.Run("missing platform non-TDX rejected", func(t *testing.T) {
-		env := types.Env{}
-		err := validatePlatform(env, attest.PlatformGCPShieldedVM)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "is required for")
-	})
-
-	t.Run("missing platform AMD rejected", func(t *testing.T) {
-		env := types.Env{}
-		err := validatePlatform(env, attest.PlatformAMDSevSnp)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "is required for")
-	})
+			if tt.expectErr {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.expectErrContains)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }

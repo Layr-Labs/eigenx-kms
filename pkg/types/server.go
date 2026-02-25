@@ -7,7 +7,7 @@ import (
 const DashboardJWTAudience = "EigenX Dashboard"
 const KMSJWTAudience = "EigenX KMS"
 const MnemonicEnvVarName = "MNEMONIC"
-const PlatformEnvVarName = "EIGEN_PLATFORM_PUBLIC"
+const MachineTypeEnvVarName = "EIGEN_MACHINE_TYPE_PUBLIC"
 const NumAddressesToDerive = 5
 
 // generic type for signed responses
