@@ -18,6 +18,7 @@ import (
 	"github.com/Layr-Labs/eigenx-kms/pkg/policy"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
 	"github.com/Layr-Labs/eigenx-kms/pkg/utils"
+	"github.com/Layr-Labs/go-tpm-tools/sdk/attest"
 	"github.com/lestrrat-go/jwx/v3/jwe"
 
 	"github.com/labstack/echo/v4"
@@ -293,6 +294,11 @@ func HandleEnvV3(c echo.Context, logger *slog.Logger, attestationVerifier attest
 		return returnError(c, logger, http.StatusInternalServerError, err.Error())
 	}
 
+	// Validate platform matches attestation
+	if err := validatePlatform(publicEnv, result.Platform); err != nil {
+		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Platform validation failed: %v", err))
+	}
+
 	// Get or generate app mnemonic (KMS encrypted)
 	mnemonic, err := kmsClient.DeriveMnemonic(ctx, appID)
 	if err != nil {
@@ -322,6 +328,25 @@ func checkRSAKeyAttestation(claims *attestation.AttestationClaims, expectedRSAKe
 		return fmt.Errorf("RSA key attestation mismatch: expected hash %s, got %s", expectedHash, claims.Nonce)
 	}
 
+	return nil
+}
+
+// validatePlatform checks that EIGEN_PLATFORM_PUBLIC in publicEnv matches the
+// attested hardware platform. Backwards-compatible: TDX deployments may omit it.
+func validatePlatform(publicEnv types.Env, attestedPlatform attest.Platform) error {
+	declared := publicEnv[types.PlatformEnvVarName]
+	expected := attestedPlatform.PlatformTag()
+
+	if declared == "" {
+		if attestedPlatform != attest.PlatformIntelTDX {
+			return fmt.Errorf("%s is required for %s platform", types.PlatformEnvVarName, expected)
+		}
+		return nil
+	}
+
+	if declared != expected {
+		return fmt.Errorf("platform mismatch: %s declares %s but attestation is %s", types.PlatformEnvVarName, declared, expected)
+	}
 	return nil
 }
 

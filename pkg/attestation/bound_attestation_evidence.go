@@ -16,6 +16,7 @@ type VerifiedAttestation struct {
 	TPMClaims *attest.TPMClaims
 	TEEClaims *attest.TEEClaims
 	Container *attest.ContainerInfo
+	Platform  attest.Platform
 }
 
 // BoundAttestationEvidenceVerifier verifies raw bound attestation evidence against a
@@ -44,7 +45,7 @@ func (v *attestVerifier) Verify(_ context.Context, attestationBytes, challenge [
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract claims: %w", err)
 	}
-	result := &VerifiedAttestation{TPMClaims: claims}
+	result := &VerifiedAttestation{TPMClaims: claims, Platform: a.Platform()}
 
 	// Extract container claims from the canonical event log.
 	container, err := a.ExtractContainerClaims()

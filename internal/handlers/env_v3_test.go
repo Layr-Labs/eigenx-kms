@@ -160,11 +160,13 @@ func gcpTPMClaims(appID, imageDigest string) *attestation.VerifiedAttestation {
 		},
 		Container: &attest.ContainerInfo{ImageDigest: imageDigest},
 		TEEClaims: nil, // GCP Shielded VM — no TEE binding
+		Platform:  attest.PlatformGCPShieldedVM,
 	}
 }
 
-// setupSuccessfulChainClient configures the chain client mock for successful V3 responses.
-func (ts *envTestSetupV3) setupSuccessfulChainClient(t *testing.T, appID string, privateEnvData types.Env) {
+// setupSuccessfulChainClientWithPublicEnv configures the chain client mock for successful V3 responses
+// with a custom publicEnv.
+func (ts *envTestSetupV3) setupSuccessfulChainClientWithPublicEnv(t *testing.T, appID string, privateEnvData types.Env, publicEnv types.Env) {
 	t.Helper()
 	hexDigest, err := hex.DecodeString(strings.TrimPrefix(testValidDigest, "sha256:"))
 	require.NoError(t, err)
@@ -177,11 +179,21 @@ func (ts *envTestSetupV3) setupSuccessfulChainClient(t *testing.T, appID string,
 	encryptedPrivateEnv, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM(kmsPublicKeyPEM, privateEnvJSON, appHeaders)
 	require.NoError(t, err)
 
-	publicEnv := types.Env{"PUBLIC_VAR": "public_value", "NODE_ENV": "production"}
-
 	ts.MockChainClient.EXPECT().
 		GetLatestRelease(gomock.Any(), appID).
 		Return(expectedDigest, publicEnv, []byte(encryptedPrivateEnv), nil)
+}
+
+// setupSuccessfulChainClient configures the chain client mock for successful V3 responses
+// with a default publicEnv containing GCP_SHIELDED_VM platform.
+func (ts *envTestSetupV3) setupSuccessfulChainClient(t *testing.T, appID string, privateEnvData types.Env) {
+	t.Helper()
+	publicEnv := types.Env{
+		"PUBLIC_VAR":               "public_value",
+		"NODE_ENV":                 "production",
+		types.PlatformEnvVarName: "GCP_SHIELDED_VM",
+	}
+	ts.setupSuccessfulChainClientWithPublicEnv(t, appID, privateEnvData, publicEnv)
 }
 
 // verifyEnvironmentResponse decrypts and verifies the environment variables in the V3 response.
@@ -399,6 +411,7 @@ func TestHandleEnvV3_CVMSuccess(t *testing.T) {
 		},
 		Container: &attest.ContainerInfo{ImageDigest: testValidDigest},
 		TEEClaims: &attest.TEEClaims{},
+		Platform:  attest.PlatformIntelTDX,
 	}
 
 	ts.MockPolicy.EXPECT().
@@ -409,7 +422,12 @@ func TestHandleEnvV3_CVMSuccess(t *testing.T) {
 		Return(nil)
 
 	privateEnv := types.Env{"SECRET_KEY": "secret_value"}
-	ts.setupSuccessfulChainClient(t, testEnvAppID, privateEnv)
+	publicEnv := types.Env{
+		"PUBLIC_VAR":               "public_value",
+		"NODE_ENV":                 "production",
+		types.PlatformEnvVarName: "INTEL_TDX",
+	}
+	ts.setupSuccessfulChainClientWithPublicEnv(t, testEnvAppID, privateEnv, publicEnv)
 
 	requestBody, _ := json.Marshal(ts.EnvRequestV3)
 	c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v3", requestBody)
@@ -419,4 +437,151 @@ func TestHandleEnvV3_CVMSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code)
 	ts.verifyEnvironmentResponse(t, rec, privateEnv)
+}
+
+func TestHandleEnvV3_PlatformMismatch(t *testing.T) {
+	logger := setupEnvLogger()
+	ts := setupEnvTestV3(t)
+
+	// Attested as TDX but publicEnv declares AMD_SEV_SNP
+	ts.Verifier.result = &attestation.VerifiedAttestation{
+		TPMClaims: &attest.TPMClaims{
+			GCE: &attest.GCEInfo{InstanceName: "app-" + testEnvAppID, ProjectID: "test-project"},
+		},
+		Container: &attest.ContainerInfo{ImageDigest: testValidDigest},
+		TEEClaims: &attest.TEEClaims{},
+		Platform:  attest.PlatformIntelTDX,
+	}
+
+	ts.MockPolicy.EXPECT().
+		CheckTPMPolicies(gomock.Any(), gomock.Any()).
+		Return(nil)
+	ts.MockPolicy.EXPECT().
+		CheckTEEPolicies(gomock.Any(), gomock.Any()).
+		Return(nil)
+
+	privateEnv := types.Env{"SECRET_KEY": "secret_value"}
+	publicEnv := types.Env{
+		"PUBLIC_VAR":               "public_value",
+		"NODE_ENV":                 "production",
+		types.PlatformEnvVarName: "AMD_SEV_SNP",
+	}
+	ts.setupSuccessfulChainClientWithPublicEnv(t, testEnvAppID, privateEnv, publicEnv)
+
+	requestBody, _ := json.Marshal(ts.EnvRequestV3)
+	c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v3", requestBody)
+
+	err := HandleEnvV3(c, logger, ts.Verifier, ts.MockPolicy, ts.MockChainClient, ts.FakeKMS, false)
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	requireErrorResponse(t, rec, "Platform validation failed")
+}
+
+func TestHandleEnvV3_PlatformMissing_NonTDX(t *testing.T) {
+	logger := setupEnvLogger()
+	ts := setupEnvTestV3(t)
+
+	// Attested as GCP Shielded VM but publicEnv omits EIGEN_PLATFORM_PUBLIC
+	ts.Verifier.result = gcpTPMClaims(testEnvAppID, testValidDigest)
+
+	ts.MockPolicy.EXPECT().
+		CheckTPMPolicies(gomock.Any(), gomock.Any()).
+		Return(nil)
+
+	privateEnv := types.Env{"SECRET_KEY": "secret_value"}
+	publicEnv := types.Env{
+		"PUBLIC_VAR": "public_value",
+		"NODE_ENV":   "production",
+		// No EIGEN_PLATFORM_PUBLIC
+	}
+	ts.setupSuccessfulChainClientWithPublicEnv(t, testEnvAppID, privateEnv, publicEnv)
+
+	requestBody, _ := json.Marshal(ts.EnvRequestV3)
+	c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v3", requestBody)
+
+	err := HandleEnvV3(c, logger, ts.Verifier, ts.MockPolicy, ts.MockChainClient, ts.FakeKMS, false)
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	requireErrorResponse(t, rec, "Platform validation failed")
+}
+
+func TestHandleEnvV3_PlatformMissing_TDX(t *testing.T) {
+	logger := setupEnvLogger()
+	ts := setupEnvTestV3(t)
+
+	// Attested as TDX with no EIGEN_PLATFORM_PUBLIC — backwards compatible, should succeed
+	ts.Verifier.result = &attestation.VerifiedAttestation{
+		TPMClaims: &attest.TPMClaims{
+			GCE: &attest.GCEInfo{InstanceName: "app-" + testEnvAppID, ProjectID: "test-project"},
+		},
+		Container: &attest.ContainerInfo{ImageDigest: testValidDigest},
+		TEEClaims: &attest.TEEClaims{},
+		Platform:  attest.PlatformIntelTDX,
+	}
+
+	ts.MockPolicy.EXPECT().
+		CheckTPMPolicies(gomock.Any(), gomock.Any()).
+		Return(nil)
+	ts.MockPolicy.EXPECT().
+		CheckTEEPolicies(gomock.Any(), gomock.Any()).
+		Return(nil)
+
+	privateEnv := types.Env{"SECRET_KEY": "secret_value"}
+	publicEnv := types.Env{
+		"PUBLIC_VAR": "public_value",
+		"NODE_ENV":   "production",
+		// No EIGEN_PLATFORM_PUBLIC — backwards compat for TDX
+	}
+	ts.setupSuccessfulChainClientWithPublicEnv(t, testEnvAppID, privateEnv, publicEnv)
+
+	requestBody, _ := json.Marshal(ts.EnvRequestV3)
+	c, rec := setupEchoContextWithBody(http.MethodPost, "/env/v3", requestBody)
+
+	err := HandleEnvV3(c, logger, ts.Verifier, ts.MockPolicy, ts.MockChainClient, ts.FakeKMS, false)
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestValidatePlatform(t *testing.T) {
+	t.Run("matching platform", func(t *testing.T) {
+		env := types.Env{types.PlatformEnvVarName: "INTEL_TDX"}
+		err := validatePlatform(env, attest.PlatformIntelTDX)
+		require.NoError(t, err)
+	})
+
+	t.Run("matching GCP Shielded VM", func(t *testing.T) {
+		env := types.Env{types.PlatformEnvVarName: "GCP_SHIELDED_VM"}
+		err := validatePlatform(env, attest.PlatformGCPShieldedVM)
+		require.NoError(t, err)
+	})
+
+	t.Run("mismatched platform", func(t *testing.T) {
+		env := types.Env{types.PlatformEnvVarName: "AMD_SEV_SNP"}
+		err := validatePlatform(env, attest.PlatformIntelTDX)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "platform mismatch")
+	})
+
+	t.Run("missing platform TDX backwards compat", func(t *testing.T) {
+		env := types.Env{}
+		err := validatePlatform(env, attest.PlatformIntelTDX)
+		require.NoError(t, err)
+	})
+
+	t.Run("missing platform non-TDX rejected", func(t *testing.T) {
+		env := types.Env{}
+		err := validatePlatform(env, attest.PlatformGCPShieldedVM)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "is required for")
+	})
+
+	t.Run("missing platform AMD rejected", func(t *testing.T) {
+		env := types.Env{}
+		err := validatePlatform(env, attest.PlatformAMDSevSnp)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "is required for")
+	})
 }
