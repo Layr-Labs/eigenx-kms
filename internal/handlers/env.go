@@ -242,7 +242,7 @@ func HandleEnvV3(c echo.Context, logger *slog.Logger, attestationVerifier attest
 	if result.TPMClaims.GCE == nil {
 		return returnError(c, logger, http.StatusUnauthorized, "GCE instance info not found in attestation")
 	}
-	if result.TPMClaims.Container == nil {
+	if result.Container == nil {
 		return returnError(c, logger, http.StatusUnauthorized, "Container info not found in attestation")
 	}
 
@@ -252,7 +252,7 @@ func HandleEnvV3(c echo.Context, logger *slog.Logger, attestationVerifier attest
 		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Failed to extract app ID: %v", err))
 	}
 
-	logger.Debug("Attestation verified", "app_id", appID, "image_digest", result.TPMClaims.Container.ImageDigest)
+	logger.Debug("Attestation verified", "app_id", appID, "image_digest", result.Container.ImageDigest)
 
 	// Add the ability to override the appID if in debug mode
 	debugAppID := strings.ToLower(c.QueryParam("appID"))
@@ -281,7 +281,7 @@ func HandleEnvV3(c echo.Context, logger *slog.Logger, attestationVerifier attest
 
 	baseClaims := &attestation.AttestationClaims{
 		AppID:       appID,
-		ImageDigest: result.TPMClaims.Container.ImageDigest,
+		ImageDigest: result.Container.ImageDigest,
 	}
 
 	// Get and decrypt chain environment

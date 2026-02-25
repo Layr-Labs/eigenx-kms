@@ -21,7 +21,7 @@ import (
 	"github.com/Layr-Labs/eigenx-kms/pkg/crypto"
 	policyMocks "github.com/Layr-Labs/eigenx-kms/pkg/policy/mocks"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
-	"github.com/Layr-Labs/go-tpm-tools/teeverify"
+	"github.com/Layr-Labs/go-tpm-tools/sdk/attest"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -152,13 +152,13 @@ func setupEnvTestV3(t *testing.T) *envTestSetupV3 {
 // gcpTPMClaims returns a VerifiedAttestation for a GCP Shielded VM (no TEE claims).
 func gcpTPMClaims(appID, imageDigest string) *attestation.VerifiedAttestation {
 	return &attestation.VerifiedAttestation{
-		TPMClaims: &teeverify.TPMClaims{
-			GCE: &teeverify.GCEInfo{
+		TPMClaims: &attest.TPMClaims{
+			GCE: &attest.GCEInfo{
 				InstanceName: "app-" + appID,
 				ProjectID:    "test-project",
 			},
-			Container: &teeverify.ContainerInfo{ImageDigest: imageDigest},
 		},
+		Container: &attest.ContainerInfo{ImageDigest: imageDigest},
 		TEEClaims: nil, // GCP Shielded VM — no TEE binding
 	}
 }
@@ -302,10 +302,10 @@ func TestHandleEnvV3_MissingGCEInfo(t *testing.T) {
 	ts := setupEnvTestV3(t)
 
 	ts.Verifier.result = &attestation.VerifiedAttestation{
-		TPMClaims: &teeverify.TPMClaims{
-			GCE:       nil,
-			Container: &teeverify.ContainerInfo{ImageDigest: testValidDigest},
+		TPMClaims: &attest.TPMClaims{
+			GCE: nil,
 		},
+		Container: &attest.ContainerInfo{ImageDigest: testValidDigest},
 	}
 
 	requestBody, _ := json.Marshal(ts.EnvRequestV3)
@@ -323,10 +323,10 @@ func TestHandleEnvV3_MissingContainerInfo(t *testing.T) {
 	ts := setupEnvTestV3(t)
 
 	ts.Verifier.result = &attestation.VerifiedAttestation{
-		TPMClaims: &teeverify.TPMClaims{
-			GCE:       &teeverify.GCEInfo{InstanceName: "app-" + testEnvAppID, ProjectID: "test-project"},
-			Container: nil,
+		TPMClaims: &attest.TPMClaims{
+			GCE: &attest.GCEInfo{InstanceName: "app-" + testEnvAppID, ProjectID: "test-project"},
 		},
+		Container: nil,
 	}
 
 	requestBody, _ := json.Marshal(ts.EnvRequestV3)
@@ -344,10 +344,10 @@ func TestHandleEnvV3_InvalidInstanceName(t *testing.T) {
 	ts := setupEnvTestV3(t)
 
 	ts.Verifier.result = &attestation.VerifiedAttestation{
-		TPMClaims: &teeverify.TPMClaims{
-			GCE:       &teeverify.GCEInfo{InstanceName: "nohyphen", ProjectID: "test-project"},
-			Container: &teeverify.ContainerInfo{ImageDigest: testValidDigest},
+		TPMClaims: &attest.TPMClaims{
+			GCE: &attest.GCEInfo{InstanceName: "nohyphen", ProjectID: "test-project"},
 		},
+		Container: &attest.ContainerInfo{ImageDigest: testValidDigest},
 	}
 
 	requestBody, _ := json.Marshal(ts.EnvRequestV3)
@@ -365,11 +365,11 @@ func TestHandleEnvV3_TEEPolicyFailure(t *testing.T) {
 	ts := setupEnvTestV3(t)
 
 	ts.Verifier.result = &attestation.VerifiedAttestation{
-		TPMClaims: &teeverify.TPMClaims{
-			GCE:       &teeverify.GCEInfo{InstanceName: "app-" + testEnvAppID, ProjectID: "test-project"},
-			Container: &teeverify.ContainerInfo{ImageDigest: testValidDigest},
+		TPMClaims: &attest.TPMClaims{
+			GCE: &attest.GCEInfo{InstanceName: "app-" + testEnvAppID, ProjectID: "test-project"},
 		},
-		TEEClaims: &teeverify.TEEClaims{},
+		Container: &attest.ContainerInfo{ImageDigest: testValidDigest},
+		TEEClaims: &attest.TEEClaims{},
 	}
 
 	ts.MockPolicy.EXPECT().
@@ -394,11 +394,11 @@ func TestHandleEnvV3_CVMSuccess(t *testing.T) {
 	ts := setupEnvTestV3(t)
 
 	ts.Verifier.result = &attestation.VerifiedAttestation{
-		TPMClaims: &teeverify.TPMClaims{
-			GCE:       &teeverify.GCEInfo{InstanceName: "app-" + testEnvAppID, ProjectID: "test-project"},
-			Container: &teeverify.ContainerInfo{ImageDigest: testValidDigest},
+		TPMClaims: &attest.TPMClaims{
+			GCE: &attest.GCEInfo{InstanceName: "app-" + testEnvAppID, ProjectID: "test-project"},
 		},
-		TEEClaims: &teeverify.TEEClaims{},
+		Container: &attest.ContainerInfo{ImageDigest: testValidDigest},
+		TEEClaims: &attest.TEEClaims{},
 	}
 
 	ts.MockPolicy.EXPECT().

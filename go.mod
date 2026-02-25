@@ -7,6 +7,7 @@ toolchain go1.24.2
 require (
 	cloud.google.com/go/kms v1.23.0
 	github.com/Layr-Labs/eigenx-contracts v0.0.0-20260223155637-6137f1b215df
+	github.com/Layr-Labs/go-tpm-tools/sdk/attest v0.0.0-20260224231618-3df231bf0b04
 	github.com/Layr-Labs/go-tpm-tools/teeverify v0.0.0-20260224003021-08df993ee46d
 	github.com/cenkalti/backoff/v5 v5.0.0
 	github.com/ethereum/go-ethereum v1.16.2
@@ -26,7 +27,7 @@ require (
 	google.golang.org/protobuf v1.36.10
 )
 
-require golang.org/x/exp v0.0.0-20240409090435-93d18d7e34b8 // indirect
+require golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56 // indirect
 
 require (
 	cloud.google.com/go v0.123.0 // indirect
@@ -37,7 +38,7 @@ require (
 	cloud.google.com/go/longrunning v0.7.0 // indirect
 	filippo.io/edwards25519 v1.0.0-rc.1 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
-	github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260224003021-08df993ee46d // indirect
+	github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260224231618-3df231bf0b04 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect

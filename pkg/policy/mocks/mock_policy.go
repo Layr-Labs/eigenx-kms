@@ -14,7 +14,7 @@ import (
 	reflect "reflect"
 
 	ImageAllowlist "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/ImageAllowlist"
-	teeverify "github.com/Layr-Labs/go-tpm-tools/teeverify"
+	attest "github.com/Layr-Labs/go-tpm-tools/sdk/attest"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -97,7 +97,7 @@ func (m *MockPolicyCheckerInterface) EXPECT() *MockPolicyCheckerInterfaceMockRec
 }
 
 // CheckTEEPolicies mocks base method.
-func (m *MockPolicyCheckerInterface) CheckTEEPolicies(ctx context.Context, teeClaims *teeverify.TEEClaims) error {
+func (m *MockPolicyCheckerInterface) CheckTEEPolicies(ctx context.Context, teeClaims *attest.TEEClaims) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CheckTEEPolicies", ctx, teeClaims)
 	ret0, _ := ret[0].(error)
@@ -111,7 +111,7 @@ func (mr *MockPolicyCheckerInterfaceMockRecorder) CheckTEEPolicies(ctx, teeClaim
 }
 
 // CheckTPMPolicies mocks base method.
-func (m *MockPolicyCheckerInterface) CheckTPMPolicies(ctx context.Context, claims *teeverify.TPMClaims) error {
+func (m *MockPolicyCheckerInterface) CheckTPMPolicies(ctx context.Context, claims *attest.TPMClaims) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CheckTPMPolicies", ctx, claims)
 	ret0, _ := ret[0].(error)

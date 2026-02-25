@@ -6,14 +6,16 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Layr-Labs/go-tpm-tools/teeverify"
+	"github.com/Layr-Labs/go-tpm-tools/sdk/attest"
 )
 
 // VerifiedAttestation holds the claims extracted from a verified raw TPM attestation.
 // TEEClaims is nil for GCP Shielded VM (no TEE binding on that platform).
+// Container is nil when the attestation has no canonical event log.
 type VerifiedAttestation struct {
-	TPMClaims *teeverify.TPMClaims
-	TEEClaims *teeverify.TEEClaims
+	TPMClaims *attest.TPMClaims
+	TEEClaims *attest.TEEClaims
+	Container *attest.ContainerInfo
 }
 
 // BoundAttestationEvidenceVerifier verifies raw bound attestation evidence against a
@@ -22,29 +24,37 @@ type BoundAttestationEvidenceVerifier interface {
 	Verify(ctx context.Context, attestationBytes, challenge []byte) (*VerifiedAttestation, error)
 }
 
-type teeverifyVerifier struct{}
+type attestVerifier struct{}
 
 // NewBoundAttestationEvidenceVerifier returns the production BoundAttestationEvidenceVerifier.
 func NewBoundAttestationEvidenceVerifier() BoundAttestationEvidenceVerifier {
-	return &teeverifyVerifier{}
+	return &attestVerifier{}
 }
 
-func (v *teeverifyVerifier) Verify(_ context.Context, attestationBytes, challenge []byte) (*VerifiedAttestation, error) {
-	attest, err := teeverify.ParseAttestation(attestationBytes)
+func (v *attestVerifier) Verify(_ context.Context, attestationBytes, challenge []byte) (*VerifiedAttestation, error) {
+	a, err := attest.Parse(attestationBytes)
 	if err != nil {
 		return nil, fmt.Errorf("attestation parsing failed: %w", err)
 	}
-	verified, err := attest.VerifyTPM(challenge, nil)
+	verified, err := a.VerifyTPM(challenge, nil)
 	if err != nil {
 		return nil, fmt.Errorf("TPM verification failed: %w", err)
 	}
-	claims, err := verified.ExtractClaims(teeverify.ExtractOptions{PCRIndices: []uint32{4, 8, 9}})
+	claims, err := verified.ExtractTPMClaims(attest.ExtractOptions{PCRIndices: []uint32{4, 8, 9}})
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract claims: %w", err)
 	}
 	result := &VerifiedAttestation{TPMClaims: claims}
-	if attest.Platform() != teeverify.PlatformGCPShieldedVM {
-		teeVerified, err := attest.VerifyBoundTEE(challenge, nil)
+
+	// Extract container claims from the canonical event log.
+	container, err := a.ExtractContainerClaims()
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract container claims: %w", err)
+	}
+	result.Container = container
+
+	if a.Platform() != attest.PlatformGCPShieldedVM {
+		teeVerified, err := a.VerifyBoundTEE(challenge, nil)
 		if err != nil {
 			return nil, fmt.Errorf("TEE verification failed: %w", err)
 		}

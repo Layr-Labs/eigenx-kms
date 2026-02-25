@@ -24,7 +24,7 @@ import (
 	"github.com/Layr-Labs/eigenx-kms/pkg/crypto"
 	policyMocks "github.com/Layr-Labs/eigenx-kms/pkg/policy/mocks"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
-	"github.com/Layr-Labs/go-tpm-tools/teeverify"
+	"github.com/Layr-Labs/go-tpm-tools/sdk/attest"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -148,10 +148,10 @@ func (ts *TestKMSServer) SetupSuccessfulMocks(t *testing.T, appID string, privat
 	ts.MockAttestationVerifier.EXPECT().
 		Verify(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&attestation.VerifiedAttestation{
-			TPMClaims: &teeverify.TPMClaims{
-				GCE:       &teeverify.GCEInfo{InstanceName: "app-" + appID, ProjectID: "test"},
-				Container: &teeverify.ContainerInfo{ImageDigest: testValidDigest},
+			TPMClaims: &attest.TPMClaims{
+				GCE: &attest.GCEInfo{InstanceName: "app-" + appID, ProjectID: "test"},
 			},
+			Container: &attest.ContainerInfo{ImageDigest: testValidDigest},
 		}, nil)
 
 	ts.MockPolicyChecker.EXPECT().

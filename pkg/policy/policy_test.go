@@ -9,7 +9,7 @@ import (
 
 	"github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/ImageAllowlist"
 	"github.com/Layr-Labs/eigenx-kms/pkg/policy/mocks"
-	"github.com/Layr-Labs/go-tpm-tools/teeverify"
+	"github.com/Layr-Labs/go-tpm-tools/sdk/attest"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -46,9 +46,9 @@ func TestCheckTPMPolicies(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		claims := &teeverify.TPMClaims{
+		claims := &attest.TPMClaims{
 			Hardened: false,
-			GCE: &teeverify.GCEInfo{
+			GCE: &attest.GCEInfo{
 				ProjectID: testProjectID,
 			},
 		}
@@ -69,9 +69,9 @@ func TestCheckTPMPolicies(t *testing.T) {
 			IsImageAllowed(gomock.Any(), gomock.Any(), gomock.Any()).
 			Return(true, nil)
 
-		claims := &teeverify.TPMClaims{
+		claims := &attest.TPMClaims{
 			Hardened: false,
-			GCE: &teeverify.GCEInfo{
+			GCE: &attest.GCEInfo{
 				ProjectID: testProjectID,
 			},
 			PCRs: map[uint32][32]byte{4: {0x01}},
@@ -88,7 +88,7 @@ func TestCheckTPMPolicies(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		claims := &teeverify.TPMClaims{
+		claims := &attest.TPMClaims{
 			Hardened: true,
 			GCE:      nil,
 		}
@@ -105,9 +105,9 @@ func TestCheckTPMPolicies(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		claims := &teeverify.TPMClaims{
+		claims := &attest.TPMClaims{
 			Hardened: true,
-			GCE: &teeverify.GCEInfo{
+			GCE: &attest.GCEInfo{
 				ProjectID: "wrong-project",
 			},
 		}
@@ -128,9 +128,9 @@ func TestCheckTEEDebugMode(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, true)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformIntelTDX,
-			TDX:      &teeverify.TDXClaims{Attributes: teeverify.TDAttributes{Debug: true}},
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformIntelTDX,
+			TDX:      &attest.TDXClaims{Attributes: attest.TDAttributes{Debug: true}},
 		}
 
 		err := pc.checkTEEDebugMode(teeClaims)
@@ -144,9 +144,9 @@ func TestCheckTEEDebugMode(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformIntelTDX,
-			TDX:      &teeverify.TDXClaims{Attributes: teeverify.TDAttributes{Debug: true}},
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformIntelTDX,
+			TDX:      &attest.TDXClaims{Attributes: attest.TDAttributes{Debug: true}},
 		}
 
 		err := pc.checkTEEDebugMode(teeClaims)
@@ -161,9 +161,9 @@ func TestCheckTEEDebugMode(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformAMDSevSnp,
-			SevSnp:   &teeverify.SevSnpClaims{Policy: teeverify.SevSnpPolicy{Debug: true}},
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformAMDSevSnp,
+			SevSnp:   &attest.SevSnpClaims{Policy: attest.SevSnpPolicy{Debug: true}},
 		}
 
 		err := pc.checkTEEDebugMode(teeClaims)
@@ -178,9 +178,9 @@ func TestCheckTEEDebugMode(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformIntelTDX,
-			TDX:      &teeverify.TDXClaims{Attributes: teeverify.TDAttributes{Debug: false}},
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformIntelTDX,
+			TDX:      &attest.TDXClaims{Attributes: attest.TDAttributes{Debug: false}},
 		}
 
 		err := pc.checkTEEDebugMode(teeClaims)
@@ -194,9 +194,9 @@ func TestCheckTEEDebugMode(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformAMDSevSnp,
-			SevSnp:   &teeverify.SevSnpClaims{Policy: teeverify.SevSnpPolicy{Debug: false}},
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformAMDSevSnp,
+			SevSnp:   &attest.SevSnpClaims{Policy: attest.SevSnpPolicy{Debug: false}},
 		}
 
 		err := pc.checkTEEDebugMode(teeClaims)
@@ -216,9 +216,9 @@ func TestCheckTCB(t *testing.T) {
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
 		// TeeTcbSvn: [minor, major, microcode, ...]
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformIntelTDX,
-			TDX: &teeverify.TDXClaims{
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformIntelTDX,
+			TDX: &attest.TDXClaims{
 				TeeTcbSvn: [16]byte{2, 1, 3}, // minor=2, major=1, microcode=3 -> TCB = (1<<16)|(2<<8)|3 = 65795
 			},
 		}
@@ -226,7 +226,7 @@ func TestCheckTCB(t *testing.T) {
 		// Expected TCB = major<<16 | minor<<8 | microcode = 1<<16 | 2<<8 | 3 = 65795
 		expectedTCB := uint64(1<<16 | 2<<8 | 3)
 		mockAllowlist.EXPECT().
-			IsTCBValid(gomock.Any(), uint8(teeverify.PlatformIntelTDX), expectedTCB).
+			IsTCBValid(gomock.Any(), uint8(attest.PlatformIntelTDX), expectedTCB).
 			Return(true, nil)
 
 		err := pc.checkTCB(ctx, teeClaims)
@@ -240,15 +240,15 @@ func TestCheckTCB(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformAMDSevSnp,
-			SevSnp: &teeverify.SevSnpClaims{
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformAMDSevSnp,
+			SevSnp: &attest.SevSnpClaims{
 				CurrentTcb: 12345,
 			},
 		}
 
 		mockAllowlist.EXPECT().
-			IsTCBValid(gomock.Any(), uint8(teeverify.PlatformAMDSevSnp), uint64(12345)).
+			IsTCBValid(gomock.Any(), uint8(attest.PlatformAMDSevSnp), uint64(12345)).
 			Return(true, nil)
 
 		err := pc.checkTCB(ctx, teeClaims)
@@ -262,9 +262,9 @@ func TestCheckTCB(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformIntelTDX,
-			TDX: &teeverify.TDXClaims{
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformIntelTDX,
+			TDX: &attest.TDXClaims{
 				TeeTcbSvn: [16]byte{1, 0, 0}, // Old version
 			},
 		}
@@ -285,9 +285,9 @@ func TestCheckTCB(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformIntelTDX,
-			TDX:      &teeverify.TDXClaims{},
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformIntelTDX,
+			TDX:      &attest.TDXClaims{},
 		}
 
 		mockAllowlist.EXPECT().
@@ -307,8 +307,8 @@ func TestCheckTCB(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformIntelTDX,
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformIntelTDX,
 			TDX:      nil,
 		}
 
@@ -324,8 +324,8 @@ func TestCheckTCB(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformAMDSevSnp,
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformAMDSevSnp,
 			SevSnp:   nil,
 		}
 
@@ -341,8 +341,8 @@ func TestCheckTCB(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformUnknown,
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformUnknown,
 		}
 
 		err := pc.checkTCB(ctx, teeClaims)
@@ -362,8 +362,8 @@ func TestCheckPCRAllowlist(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		claims := &teeverify.TPMClaims{
-			Platform: teeverify.PlatformIntelTDX,
+		claims := &attest.TPMClaims{
+			Platform: attest.PlatformIntelTDX,
 			PCRs: map[uint32][32]byte{
 				4: {0x01, 0x02, 0x03},
 				8: {0x04, 0x05, 0x06},
@@ -372,7 +372,7 @@ func TestCheckPCRAllowlist(t *testing.T) {
 		}
 
 		mockAllowlist.EXPECT().
-			IsImageAllowed(gomock.Any(), uint8(teeverify.PlatformIntelTDX), gomock.Any()).
+			IsImageAllowed(gomock.Any(), uint8(attest.PlatformIntelTDX), gomock.Any()).
 			DoAndReturn(func(ctx context.Context, cvm uint8, pcrs []ImageAllowlist.IImageAllowlistPCR) (bool, error) {
 				// Verify PCRs are sorted
 				require.Len(t, pcrs, 3)
@@ -393,8 +393,8 @@ func TestCheckPCRAllowlist(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		claims := &teeverify.TPMClaims{
-			Platform: teeverify.PlatformIntelTDX,
+		claims := &attest.TPMClaims{
+			Platform: attest.PlatformIntelTDX,
 			PCRs: map[uint32][32]byte{
 				4: {0x01},
 			},
@@ -416,8 +416,8 @@ func TestCheckPCRAllowlist(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		claims := &teeverify.TPMClaims{
-			Platform: teeverify.PlatformIntelTDX,
+		claims := &attest.TPMClaims{
+			Platform: attest.PlatformIntelTDX,
 			PCRs:     map[uint32][32]byte{},
 		}
 
@@ -482,8 +482,8 @@ func TestVerifyFirmware(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformIntelTDX,
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformIntelTDX,
 			TDX:      nil,
 		}
 
@@ -499,8 +499,8 @@ func TestVerifyFirmware(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformAMDSevSnp,
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformAMDSevSnp,
 			SevSnp:   nil,
 		}
 
@@ -516,8 +516,8 @@ func TestVerifyFirmware(t *testing.T) {
 		mockAllowlist := mocks.NewMockImageAllowlistChecker(ctrl)
 		pc := NewPolicyChecker(logger, testProjectID, mockAllowlist, false)
 
-		teeClaims := &teeverify.TEEClaims{
-			Platform: teeverify.PlatformUnknown,
+		teeClaims := &attest.TEEClaims{
+			Platform: attest.PlatformUnknown,
 		}
 
 		err := pc.verifyFirmware(context.Background(), teeClaims)
