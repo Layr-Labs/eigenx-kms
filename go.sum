@@ -95,12 +95,10 @@ github.com/KyleBanks/depth v1.2.1 h1:5h8fQADFrWtarTdtDudMmGsC7GPbOAu6RVB3ffsVFHc
 github.com/KyleBanks/depth v1.2.1/go.mod h1:jzSb9d0L43HxTQfT+oSA1EEp2q+ne2uh6XgeJcm8brE=
 github.com/Layr-Labs/eigenx-contracts v0.0.0-20260223155637-6137f1b215df h1:hh+hdEUEeUOwfUwTpWN3Uh44um8g/C/WTz6uncVbtdQ=
 github.com/Layr-Labs/eigenx-contracts v0.0.0-20260223155637-6137f1b215df/go.mod h1:fcLQZBQ4RpTXv3Kz4cO/raRxKrfWUC+r8hSB94pSKFc=
-github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260224231618-3df231bf0b04 h1:WkIktuciPE+MSfOhpApBsGD6dTRaMjTSc0qphVpDKBM=
-github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260224231618-3df231bf0b04/go.mod h1:kVgW9SfWsPuaI61h9Q7TN6aqeS2rnU2FIc+3vIDSKnE=
-github.com/Layr-Labs/go-tpm-tools/sdk/attest v0.0.0-20260224231618-3df231bf0b04 h1:q/gW+vcs6MBCJs2YpDbcb8lzP1B5uauStWnwF+dMZy4=
-github.com/Layr-Labs/go-tpm-tools/sdk/attest v0.0.0-20260224231618-3df231bf0b04/go.mod h1:rKilwaZKgl4AIKqtaFNTRdE0ys6ujXvTY2oZWp/iE/0=
-github.com/Layr-Labs/go-tpm-tools/teeverify v0.0.0-20260224003021-08df993ee46d h1:RWuT413LeeaUvlrR68h2cc0iWeru8vVER036asrZbVc=
-github.com/Layr-Labs/go-tpm-tools/teeverify v0.0.0-20260224003021-08df993ee46d/go.mod h1:IJy/SYYwE2oRwJ/htkzz+tC+eS0taT6HZbn5U5pNLpE=
+github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260225172416-bbd228942d4a h1:IllmBrszK6Rp/2GD5/4lLdw8qzfNeHwX2ce6puw1ydU=
+github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260225172416-bbd228942d4a/go.mod h1:kVgW9SfWsPuaI61h9Q7TN6aqeS2rnU2FIc+3vIDSKnE=
+github.com/Layr-Labs/go-tpm-tools/sdk/attest v0.0.0-20260225172416-bbd228942d4a h1:+9gicsKViWUZiJ3iN9O7SJhxaCoN3m0v/GR5qpIu7Nw=
+github.com/Layr-Labs/go-tpm-tools/sdk/attest v0.0.0-20260225172416-bbd228942d4a/go.mod h1:rKilwaZKgl4AIKqtaFNTRdE0ys6ujXvTY2oZWp/iE/0=
 github.com/Masterminds/goutils v1.1.0/go.mod h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=
 github.com/Masterminds/semver v1.4.2/go.mod h1:MB6lktGJrhw8PrUyiEoblNEGEQ+RzHPF078ddwwvV3Y=
 github.com/Masterminds/semver v1.5.0/go.mod h1:MB6lktGJrhw8PrUyiEoblNEGEQ+RzHPF078ddwwvV3Y=
