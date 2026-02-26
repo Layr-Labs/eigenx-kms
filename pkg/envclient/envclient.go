@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Layr-Labs/eigenx-kms/pkg/crypto"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
+	"github.com/Layr-Labs/eigenx-kms/pkg/utils"
 	"github.com/cenkalti/backoff/v5"
 )
 
@@ -130,9 +132,10 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 	}
 
 	// Send request to server with base64-encoded attestation and RSA public key
+	attestationBase64 := base64.StdEncoding.EncodeToString(attestationBytes)
 	e.Logger.Debug("Sending request to server", "url", e.serverURL)
 	response, err := e.sendRequest(ctx, types.EnvRequestV3{
-		Attestation: base64.StdEncoding.EncodeToString(attestationBytes),
+		Attestation: attestationBase64,
 		RSAKeyPEM:   string(rsaPublicKeyPEM),
 	})
 	if err != nil {
@@ -189,7 +192,19 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 	}
 	e.Logger.Info("Derived addresses from mnemonic", "addresses", string(addressBytes))
 
-	// TODO: Talk to Rich about v3 user API attestation upload
+	// Upload raw attestation to user API (non-fatal)
+	appAddress, err := utils.GetAppAddressFromMetadata(ctx)
+	if err != nil {
+		e.Logger.Error("Failed to get app address from GCE metadata for attestation upload", "error", err)
+	} else {
+		challengeHex := hex.EncodeToString(rsaKeyHash)
+		e.Logger.Info("Posting attestation to user API", "url", e.userAPIURL, "app_address", appAddress)
+		if err := e.postAttestationToUserAPI(ctx, appAddress, attestationBase64, challengeHex, ""); err != nil {
+			e.Logger.Error("Failed to post attestation to user API after retries", "error", err)
+		} else {
+			e.Logger.Info("Successfully posted attestation to user API")
+		}
+	}
 
 	return envJSONBytes, nil
 }
@@ -262,4 +277,57 @@ func (e *EnvClient) sendRequest(ctx context.Context, envRequest types.EnvRequest
 	}
 
 	return &signedResponse, nil
+}
+
+func (e *EnvClient) postAttestationToUserAPI(ctx context.Context, appAddress string, attestationBase64 string, challenge string, extraData string) error {
+	payload := map[string]string{
+		"app_address": appAddress,
+		"attestation": attestationBase64,
+		"challenge":   challenge,
+		"extra_data":  extraData,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal attestation payload: %w", err)
+	}
+
+	url := e.userAPIURL + "/v2/attestation"
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	operation := func() ([]byte, error) {
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(payloadBytes))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		responseBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode >= 500 {
+			return nil, fmt.Errorf("server error %d: %s", resp.StatusCode, string(responseBody))
+		}
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+			return nil, backoff.Permanent(fmt.Errorf("client error %d: %s", resp.StatusCode, string(responseBody)))
+		}
+
+		e.Logger.Debug("User API attestation response", "status", resp.StatusCode, "body", string(responseBody))
+		return responseBody, nil
+	}
+
+	_, err = e.retryHTTPRequest(ctx, "Posting attestation to user API...", operation)
+	if err != nil {
+		return fmt.Errorf("failed to post attestation after retries: %w", err)
+	}
+
+	return nil
 }
