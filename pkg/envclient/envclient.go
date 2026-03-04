@@ -15,7 +15,6 @@ import (
 
 	"github.com/Layr-Labs/eigenx-kms/pkg/crypto"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
-	"github.com/Layr-Labs/eigenx-kms/pkg/utils"
 	"github.com/cenkalti/backoff/v5"
 )
 
@@ -193,17 +192,12 @@ func (e *EnvClient) GetEnv(ctx context.Context) ([]byte, error) {
 	e.Logger.Info("Derived addresses from mnemonic", "addresses", string(addressBytes))
 
 	// Upload raw attestation to user API (non-fatal)
-	appAddress, err := utils.GetAppAddressFromMetadata(ctx)
-	if err != nil {
-		e.Logger.Error("Failed to get app address from GCE metadata for attestation upload", "error", err)
+	challengeHex := hex.EncodeToString(rsaKeyHash)
+	e.Logger.Info("Posting attestation to user API", "url", e.userAPIURL)
+	if err := e.postAttestationToUserAPI(ctx, attestationBase64, challengeHex, ""); err != nil {
+		e.Logger.Error("Failed to post attestation to user API after retries", "error", err)
 	} else {
-		challengeHex := hex.EncodeToString(rsaKeyHash)
-		e.Logger.Info("Posting attestation to user API", "url", e.userAPIURL, "app_address", appAddress)
-		if err := e.postAttestationToUserAPI(ctx, appAddress, attestationBase64, challengeHex, ""); err != nil {
-			e.Logger.Error("Failed to post attestation to user API after retries", "error", err)
-		} else {
-			e.Logger.Info("Successfully posted attestation to user API")
-		}
+		e.Logger.Info("Successfully posted attestation to user API")
 	}
 
 	return envJSONBytes, nil
@@ -279,9 +273,8 @@ func (e *EnvClient) sendRequest(ctx context.Context, envRequest types.EnvRequest
 	return &signedResponse, nil
 }
 
-func (e *EnvClient) postAttestationToUserAPI(ctx context.Context, appAddress string, attestationBase64 string, challenge string, extraData string) error {
+func (e *EnvClient) postAttestationToUserAPI(ctx context.Context, attestationBase64 string, challenge string, extraData string) error {
 	payload := map[string]string{
-		"app_address": appAddress,
 		"attestation": attestationBase64,
 		"challenge":   challenge,
 		"extra_data":  extraData,
