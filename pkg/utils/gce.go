@@ -5,10 +5,7 @@ import (
 	"strings"
 )
 
-const (
-	instanceNameDelimiter = "-"
-	gceMetadataURL        = "http://metadata.google.internal/computeMetadata/v1/instance/name"
-)
+const instanceNameDelimiter = "-"
 
 // ExtractAppIDFromInstanceName extracts the app ID from a GCE instance name.
 // The instance name format is expected to be: <prefix>-<app-id>
