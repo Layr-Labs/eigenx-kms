@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/urfave/cli/v2"
 )
@@ -39,8 +40,10 @@ type ServerConfig struct {
 	KMSSigningKeyName     string       `json:"kms_signing_key_name"`
 	RPCURL                string       `json:"rpc_url"`
 	AppControllerAddress  string       `json:"app_controller_address"`
-	ImageAllowlistAddress string       `json:"image_allowlist_address"`
-	Logger                *slog.Logger `json:"-"`
+	ImageAllowlistAddress  string        `json:"image_allowlist_address"`
+	AttestJWTSigningKeyPEM string        `json:"attest_jwt_signing_key_pem"`
+	AttestJWTExpiration    time.Duration `json:"attest_jwt_expiration"`
+	Logger                 *slog.Logger  `json:"-"`
 }
 
 func NewServerConfigFromCLI(c *cli.Context) (*ServerConfig, error) {
@@ -59,7 +62,9 @@ func NewServerConfigFromCLI(c *cli.Context) (*ServerConfig, error) {
 		KMSSigningKeyName:     c.String(KMSSigningKeyNameFlag.Name),
 		RPCURL:                c.String(RPCURLFlag.Name),
 		AppControllerAddress:  c.String(AppControllerAddressFlag.Name),
-		ImageAllowlistAddress: c.String(ImageAllowlistAddressFlag.Name),
+		ImageAllowlistAddress:  c.String(ImageAllowlistAddressFlag.Name),
+		AttestJWTSigningKeyPEM: c.String(AttestJWTSigningKeyFlag.Name),
+		AttestJWTExpiration:    c.Duration(AttestJWTExpirationFlag.Name),
 	}
 
 	if err := config.Validate(); err != nil {

@@ -70,3 +70,15 @@ type JWTWithRSAKey struct {
 	JWT    string `json:"jwt"`
 	RSAKey string `json:"rsaKey"`
 }
+
+type AttestRequest struct {
+	Version                int    `json:"version"`
+	EncryptedJWTWithRSAKey string `json:"encryptedJwtWithRsaKey,omitempty"` // V1
+	JWTWithAttestedRSAKey  string `json:"jwtWithAttestedRsaKey,omitempty"`  // V2
+	Attestation            string `json:"attestation,omitempty"`            // V3
+	RSAKeyPEM              string `json:"rsaKey,omitempty"`                 // V2 & V3
+}
+
+type AttestResponse struct {
+	Token string `json:"token"`
+}

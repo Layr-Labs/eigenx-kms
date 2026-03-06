@@ -1,6 +1,10 @@
 package utils
 
-import "github.com/urfave/cli/v2"
+import (
+	"time"
+
+	"github.com/urfave/cli/v2"
+)
 
 var (
 	PortFlag = &cli.StringFlag{
@@ -146,6 +150,19 @@ var (
 	OutputFileFlag = &cli.StringFlag{
 		Name:  "output",
 		Usage: "Output file path to write environment variables in key=value format",
+	}
+
+	AttestJWTSigningKeyFlag = &cli.StringFlag{
+		Name:    "attest-jwt-signing-key",
+		Usage:   "PEM-encoded RSA private key for signing attestation JWTs (enables /auth/attest endpoint)",
+		EnvVars: []string{"ATTEST_JWT_SIGNING_KEY"},
+	}
+
+	AttestJWTExpirationFlag = &cli.DurationFlag{
+		Name:    "attest-jwt-expiration",
+		Value:   8760 * time.Hour,
+		Usage:   "Expiration duration for attestation JWTs",
+		EnvVars: []string{"ATTEST_JWT_EXPIRATION"},
 	}
 
 	UserAPIURLFlag = &cli.StringFlag{
