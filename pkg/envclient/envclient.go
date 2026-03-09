@@ -273,6 +273,103 @@ func (e *EnvClient) sendRequest(ctx context.Context, envRequest types.EnvRequest
 	return &signedResponse, nil
 }
 
+func (e *EnvClient) Attest(ctx context.Context) (string, error) {
+	// Generate RSA key pair on the fly
+	e.Logger.Info("Generating RSA key pair for attestation")
+	_, rsaPublicKeyPEM, err := crypto.GenerateRSAKeyPair()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate RSA key pair: %w", err)
+	}
+
+	// Calculate RSA key hash for challenge
+	rsaKeyHash := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, rsaPublicKeyPEM)
+
+	// Request raw attestation with RSA key hash as challenge
+	e.Logger.Info("Requesting attestation")
+	attestationBytes, err := e.attestationProvider.GetAttestation(ctx, rsaKeyHash)
+	if err != nil {
+		return "", fmt.Errorf("failed to get attestation: %w", err)
+	}
+
+	// Send request to server with base64-encoded attestation and RSA public key
+	attestationBase64 := base64.StdEncoding.EncodeToString(attestationBytes)
+	e.Logger.Debug("Sending attest request to server", "url", e.serverURL)
+	response, err := e.sendAttestRequest(ctx, types.AttestRequest{
+		Version:     3,
+		Attestation: attestationBase64,
+		RSAKeyPEM:   string(rsaPublicKeyPEM),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to send attest request: %w", err)
+	}
+
+	e.Logger.Info("Received attest response from server")
+
+	// Verify signature
+	e.Logger.Debug("Verifying response signature")
+	isValid, err := crypto.VerifyKMSSignature(*response, e.kmsSigningKey)
+	if err != nil {
+		return "", fmt.Errorf("signature verification error: %w", err)
+	}
+	if !isValid {
+		return "", fmt.Errorf("invalid signature")
+	}
+
+	e.Logger.Info("Signature verified successfully")
+
+	return response.Data.Token, nil
+}
+
+func (e *EnvClient) sendAttestRequest(ctx context.Context, attestRequest types.AttestRequest) (*types.SignedResponse[types.AttestResponse], error) {
+	requestBody, err := json.Marshal(attestRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal attest request: %w", err)
+	}
+
+	url := e.serverURL + "/auth/attest"
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	operation := func() ([]byte, error) {
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(requestBody))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		responseBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode >= 500 {
+			return nil, fmt.Errorf("server error %d: %s", resp.StatusCode, string(responseBody))
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, backoff.Permanent(fmt.Errorf("client error %d: %s", resp.StatusCode, string(responseBody)))
+		}
+
+		return responseBody, nil
+	}
+
+	responseBody, err := e.retryHTTPRequest(ctx, "Requesting attestation JWT from server...", operation)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send attest request after retries: %w", err)
+	}
+
+	var signedResponse types.SignedResponse[types.AttestResponse]
+	if err := json.Unmarshal(responseBody, &signedResponse); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &signedResponse, nil
+}
+
 func (e *EnvClient) postAttestationToUserAPI(ctx context.Context, attestationBase64 string, challenge string, extraData string) error {
 	payload := map[string]string{
 		"attestation": attestationBase64,
