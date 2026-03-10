@@ -1,6 +1,10 @@
 package utils
 
-import "github.com/urfave/cli/v2"
+import (
+	"time"
+
+	"github.com/urfave/cli/v2"
+)
 
 var (
 	PortFlag = &cli.StringFlag{
@@ -146,6 +150,38 @@ var (
 	OutputFileFlag = &cli.StringFlag{
 		Name:  "output",
 		Usage: "Output file path to write environment variables in key=value format",
+	}
+
+	AttestJWTSigningKeyFlag = &cli.StringFlag{
+		Name:    "attest-jwt-signing-key",
+		Usage:   "PEM-encoded RSA private key for signing attestation JWTs (enables /auth/attest endpoint)",
+		EnvVars: []string{"ATTEST_JWT_SIGNING_KEY"},
+	}
+
+	AttestJWTExpirationFlag = &cli.DurationFlag{
+		Name:    "attest-jwt-expiration",
+		Value:   8760 * time.Hour,
+		Usage:   "Expiration duration for attestation JWTs",
+		EnvVars: []string{"ATTEST_JWT_EXPIRATION"},
+	}
+
+	AttestJWTSigningKeySourceFlag = &cli.StringFlag{
+		Name:    "attest-jwt-signing-key-source",
+		Value:   "direct",
+		Usage:   "Source for attestation JWT signing key: 'direct' (from env/flag) or 'secret-manager' (from GCP Secret Manager)",
+		EnvVars: []string{"ATTEST_JWT_SIGNING_KEY_SOURCE"},
+	}
+
+	AttestJWTSigningKeySecretFlag = &cli.StringFlag{
+		Name:    "attest-jwt-signing-key-secret",
+		Usage:   "GCP Secret Manager resource name (e.g. projects/my-project/secrets/my-secret/versions/latest)",
+		EnvVars: []string{"ATTEST_JWT_SIGNING_KEY_SECRET"},
+	}
+
+	AudienceFlag = &cli.StringFlag{
+		Name:    "audience",
+		Usage:   "JWT audience claim for attestation token",
+		EnvVars: []string{"ATTEST_AUDIENCE"},
 	}
 
 	UserAPIURLFlag = &cli.StringFlag{

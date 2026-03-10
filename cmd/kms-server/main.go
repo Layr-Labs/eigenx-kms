@@ -14,6 +14,7 @@ import (
 
 	appcontrollerV1 "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/AppController"
 	"github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/ImageAllowlist"
+	"github.com/Layr-Labs/eigenx-kms/internal/auth"
 	"github.com/Layr-Labs/eigenx-kms/internal/handlers"
 	"github.com/Layr-Labs/eigenx-kms/internal/kms"
 	"github.com/Layr-Labs/eigenx-kms/internal/utils"
@@ -51,6 +52,10 @@ func main() {
 			utils.RPCURLFlag,
 			utils.AppControllerAddressFlag,
 			utils.ImageAllowlistAddressFlag,
+			utils.AttestJWTSigningKeyFlag,
+			utils.AttestJWTExpirationFlag,
+			utils.AttestJWTSigningKeySourceFlag,
+			utils.AttestJWTSigningKeySecretFlag,
 		},
 		Action: runServer,
 	}
@@ -62,12 +67,12 @@ func main() {
 }
 
 func runServer(c *cli.Context) error {
-	cfg, err := utils.NewServerConfigFromCLI(c)
+	ctx := context.Background()
+
+	cfg, err := utils.NewServerConfigFromCLI(ctx, c)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
-
-	ctx := context.Background()
 
 	// Initialize components
 	attestationVerifier, err := attestation.NewAttestationVerifier(ctx, cfg.Logger, cfg.AttestationProjectID, 1*time.Hour, cfg.Debug)
@@ -152,6 +157,19 @@ func runServer(c *cli.Context) error {
 	e.POST("/env/v3", func(c echo.Context) error {
 		return handlers.HandleEnvV3(c, cfg.Logger, attestationEvidenceVerifier, policyChecker, chainClient, kmsClient, cfg.Debug)
 	}, middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(cfg.EnvRateLimit))))
+
+	// Conditionally register /auth/attest if signing key is configured
+	if cfg.AttestJWTSigningKeyPEM != "" {
+		jwtSigner, err := auth.NewJWTSigner(cfg.AttestJWTSigningKeyPEM, cfg.AttestJWTExpiration)
+		if err != nil {
+			return fmt.Errorf("failed to initialize JWT signer: %w", err)
+		}
+		cfg.Logger.Info("Attestation JWT signing enabled", "expiration", cfg.AttestJWTExpiration)
+
+		e.POST("/auth/attest", func(c echo.Context) error {
+			return handlers.HandleAttest(c, cfg.Logger, jwtSigner, attestationEvidenceVerifier, policyChecker, kmsClient, cfg.Debug)
+		}, middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(cfg.EnvRateLimit))))
+	}
 
 	// Swagger endpoint
 	e.GET("/swagger/*", echoSwagger.WrapHandler)

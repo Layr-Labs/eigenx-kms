@@ -16,6 +16,37 @@ type ClientConfig struct {
 	Logger        *slog.Logger
 }
 
+type AttestConfig struct {
+	ServerURL     string
+	KMSSigningKey string
+	LogLevel      string
+	OutputFile    string
+	Audience      string
+	Logger        *slog.Logger
+}
+
+func NewAttestConfigFromCLI(c *cli.Context) (*AttestConfig, error) {
+	config := &AttestConfig{
+		ServerURL:     c.String(KMSServerURLFlag.Name),
+		KMSSigningKey: c.String(KMSSigningKeyFileFlag.Name),
+		LogLevel:      c.String(LogLevelFlag.Name),
+		OutputFile:    c.String(OutputFileFlag.Name),
+		Audience:      c.String(AudienceFlag.Name),
+	}
+
+	config.Logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: GetLogLevel(config.LogLevel)}))
+
+	config.Logger.Info("Attest configuration loaded",
+		"server_url", config.ServerURL,
+		"kms_signing_key", config.KMSSigningKey,
+		"log_level", config.LogLevel,
+		"output_file", config.OutputFile,
+		"audience", config.Audience,
+	)
+
+	return config, nil
+}
+
 func NewClientConfigFromCLI(c *cli.Context) (*ClientConfig, error) {
 	config := &ClientConfig{
 		ServerURL:     c.String(KMSServerURLFlag.Name),

@@ -26,6 +26,20 @@ func main() {
 			utils.UserAPIURLFlag,
 		},
 		Action: runClient,
+		Commands: []*cli.Command{
+			{
+				Name:  "attest",
+				Usage: "Request attestation JWT from KMS server",
+				Flags: []cli.Flag{
+					utils.KMSServerURLFlag,
+					utils.KMSSigningKeyFileFlag,
+					utils.LogLevelFlag,
+					utils.OutputFileFlag,
+					utils.AudienceFlag,
+				},
+				Action: runAttest,
+			},
+		},
 	}
 
 	if err := app.Run(os.Args); err != nil {
@@ -67,6 +81,43 @@ func runClient(c *cli.Context) error {
 		fmt.Printf("%s\n", responseJSON)
 		return nil
 	}
+}
+
+func runAttest(c *cli.Context) error {
+	ctx := context.Background()
+
+	cfg, err := utils.NewAttestConfigFromCLI(c)
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Read KMS signing key
+	cfg.Logger.Debug("Reading KMS signing key", "file", cfg.KMSSigningKey)
+	kmsSigningKeyBytes, err := os.ReadFile(cfg.KMSSigningKey)
+	if err != nil {
+		return fmt.Errorf("failed to read KMS signing key: %w", err)
+	}
+
+	// Create attestation provider
+	attestationProvider := envclient.NewBoundEvidenceProvider(cfg.Logger)
+
+	envClient := envclient.NewEnvClient(cfg.Logger, attestationProvider, kmsSigningKeyBytes, cfg.ServerURL, "")
+	token, err := envClient.Attest(ctx, cfg.Audience)
+	if err != nil {
+		return fmt.Errorf("failed to get attestation JWT: %w", err)
+	}
+
+	// Write to file or stdout
+	if cfg.OutputFile != "" {
+		if err := os.WriteFile(cfg.OutputFile, []byte(token), 0600); err != nil {
+			return fmt.Errorf("failed to write output file: %w", err)
+		}
+		cfg.Logger.Info("Attestation JWT written to file", "file", cfg.OutputFile)
+	} else {
+		fmt.Print(token)
+	}
+
+	return nil
 }
 
 func writeEnvFile(cfg *utils.ClientConfig, envJSONBytes []byte) error {
