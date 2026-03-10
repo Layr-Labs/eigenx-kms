@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Layr-Labs/eigenx-kms/internal/kms"
@@ -52,4 +53,17 @@ func returnError(c echo.Context, logger *slog.Logger, status int, errString stri
 	logger.Error(errString)
 	c.JSON(status, map[string]string{"error": errString})
 	return nil
+}
+
+// applyDebugOverride checks for the debug appID query parameter and applies it if in debug mode.
+// Returns the final appID, or empty string if a debug override was requested but debug mode is off.
+func applyDebugOverride(c echo.Context, appID string, debugMode bool) string {
+	debugAppID := strings.ToLower(c.QueryParam("appID"))
+	if debugAppID != "" {
+		if debugMode {
+			return debugAppID
+		}
+		return ""
+	}
+	return appID
 }

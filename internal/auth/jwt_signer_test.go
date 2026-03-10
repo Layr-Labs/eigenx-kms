@@ -64,7 +64,8 @@ func TestSignAttestationJWT_Claims(t *testing.T) {
 	appID := "0x1234567890abcdef1234567890abcdef12345678"
 	imageDigest := "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
 
-	tokenStr, err := signer.SignAttestationJWT(appID, imageDigest)
+	audience := "test-audience"
+	tokenStr, err := signer.SignAttestationJWT(appID, imageDigest, audience)
 	require.NoError(t, err)
 	require.NotEmpty(t, tokenStr)
 
@@ -90,6 +91,11 @@ func TestSignAttestationJWT_Claims(t *testing.T) {
 	require.True(t, ok)
 	require.WithinDuration(t, time.Now().Add(expiration), exp, 5*time.Second)
 
+	// Check audience
+	aud, ok := parsed.Audience()
+	require.True(t, ok)
+	require.Contains(t, aud, audience)
+
 	// Check custom claims
 	var gotAppID string
 	require.NoError(t, parsed.Get("appId", &gotAppID))
@@ -105,7 +111,7 @@ func TestSignAttestationJWT_VerifiableWithPublicKey(t *testing.T) {
 	signer, err := NewJWTSigner(pemStr, time.Hour)
 	require.NoError(t, err)
 
-	tokenStr, err := signer.SignAttestationJWT("app1", "sha256:abc123")
+	tokenStr, err := signer.SignAttestationJWT("app1", "sha256:abc123", "")
 	require.NoError(t, err)
 
 	// Verification should succeed with the correct public key

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/Layr-Labs/eigenx-kms/internal/auth"
 	"github.com/Layr-Labs/eigenx-kms/internal/kms"
@@ -22,11 +21,11 @@ import (
 // HandleAttest godoc
 //
 //	@Summary		Attest and receive a signed JWT
-//	@Description	Verify attestation and return a signed JWT containing the attested appId and imageDigest
+//	@Description	Verify attestation and return an encrypted, signed JWT containing the attested appId and imageDigest
 //	@Tags			auth
 //	@Accept			json
 //	@Produce		json
-//	@Param			data	body		types.AttestRequest	true	"Attestation request with version discriminator"
+//	@Param			data	body		types.AttestRequest	true	"Attestation request (V3 only)"
 //	@Param			appID	query		string				false	"App ID override (debug mode only)"
 //	@Success		200		{object}	types.SignedResponse[types.AttestResponse]
 //	@Failure		400		{object}	map[string]string
@@ -37,7 +36,6 @@ func HandleAttest(
 	c echo.Context,
 	logger *slog.Logger,
 	jwtSigner *auth.JWTSigner,
-	attestationVerifier attestation.AttestationVerifierInterface,
 	attestationEvidenceVerifier attestation.BoundAttestationEvidenceVerifier,
 	policyChecker policy.PolicyCheckerInterface,
 	kmsClient kms.KMSClient,
@@ -51,20 +49,11 @@ func HandleAttest(
 		return returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("Failed to parse attest request: %v", err))
 	}
 
-	var appID, imageDigest string
-	var err error
-
-	switch req.Version {
-	case 1:
-		appID, imageDigest, err = handleAttestV1(ctx, c, attestationVerifier, kmsClient, req, debugMode)
-	case 2:
-		appID, imageDigest, err = handleAttestV2(ctx, c, attestationVerifier, req, debugMode)
-	case 3:
-		appID, imageDigest, err = handleAttestV3(ctx, c, attestationEvidenceVerifier, policyChecker, req, debugMode)
-	default:
-		return returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("Unsupported attestation version: %d", req.Version))
+	if req.Version != 3 {
+		return returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("Unsupported attestation version: %d, only version 3 is supported", req.Version))
 	}
 
+	appID, imageDigest, err := handleAttestV3(ctx, c, attestationEvidenceVerifier, policyChecker, req, debugMode)
 	if err != nil {
 		if httpErr, ok := err.(*httpError); ok {
 			return returnError(c, logger, httpErr.statusCode, httpErr.message)
@@ -72,77 +61,24 @@ func HandleAttest(
 		return returnError(c, logger, http.StatusInternalServerError, err.Error())
 	}
 
-	token, err := jwtSigner.SignAttestationJWT(appID, imageDigest)
+	token, err := jwtSigner.SignAttestationJWT(appID, imageDigest, req.Audience)
 	if err != nil {
 		return returnError(c, logger, http.StatusInternalServerError, fmt.Sprintf("Failed to sign attestation JWT: %v", err))
 	}
 
-	resp := types.AttestResponse{Token: token}
+	// Encrypt the token with the client's RSA public key (same pattern as /env endpoints)
+	tokenBytes, err := json.Marshal(map[string]string{"token": token})
+	if err != nil {
+		return returnError(c, logger, http.StatusInternalServerError, fmt.Sprintf("Failed to marshal token: %v", err))
+	}
+
+	encryptedToken, err := crypto.EncryptRSAOAEPAndAES256GCMWithPEM([]byte(req.RSAKeyPEM), tokenBytes, nil)
+	if err != nil {
+		return returnError(c, logger, http.StatusInternalServerError, fmt.Sprintf("Failed to encrypt token: %v", err))
+	}
+
+	resp := types.AttestResponse{EncryptedToken: string(encryptedToken)}
 	return returnSuccessWithSignature(c, logger, kmsClient, http.StatusOK, resp)
-}
-
-func handleAttestV1(
-	ctx context.Context,
-	c echo.Context,
-	attestationVerifier attestation.AttestationVerifierInterface,
-	kmsClient kms.KMSClient,
-	req types.AttestRequest,
-	debugMode bool,
-) (string, string, error) {
-	// Decrypt the encrypted request body to get JWT + RSA key
-	jwtWithKeyBytes, err := crypto.DecryptWithRSAOAEPAndAES256GCM(kmsClient, []byte(req.EncryptedJWTWithRSAKey))
-	if err != nil {
-		return "", "", newHTTPError(http.StatusBadRequest, "Failed to decrypt encrypted request body: %v", err)
-	}
-
-	var jwtWithKey types.JWTWithRSAKey
-	if err := json.Unmarshal(jwtWithKeyBytes, &jwtWithKey); err != nil {
-		return "", "", newHTTPError(http.StatusBadRequest, "Failed to unmarshal jwt with key: %v", err)
-	}
-
-	claims, err := attestationVerifier.VerifyAttestation(ctx, jwtWithKey.JWT, attestation.GoogleConfidentialSpace)
-	if err != nil {
-		return "", "", newHTTPError(http.StatusUnauthorized, "Attestation verification failed: %v", err)
-	}
-
-	if claims.Nonce != "" {
-		return "", "", newHTTPError(http.StatusBadRequest, "nonce should be empty for v1 attestation requests")
-	}
-
-	appID := applyDebugOverride(c, claims.AppID, debugMode)
-	if appID == "" {
-		return "", "", newHTTPError(http.StatusBadRequest, "appID query parameter is only allowed in debug mode")
-	}
-
-	return appID, claims.ImageDigest, nil
-}
-
-func handleAttestV2(
-	ctx context.Context,
-	c echo.Context,
-	attestationVerifier attestation.AttestationVerifierInterface,
-	req types.AttestRequest,
-	debugMode bool,
-) (string, string, error) {
-	if err := crypto.ValidateRSAKeySize([]byte(req.RSAKeyPEM)); err != nil {
-		return "", "", newHTTPError(http.StatusBadRequest, "encryption key size mismatch: %v", err)
-	}
-
-	claims, err := attestationVerifier.VerifyAttestation(ctx, req.JWTWithAttestedRSAKey, attestation.IntelTrustAuthority)
-	if err != nil {
-		return "", "", newHTTPError(http.StatusUnauthorized, "Attestation verification failed: %v", err)
-	}
-
-	if err := checkRSAKeyAttestation(claims, req.RSAKeyPEM); err != nil {
-		return "", "", newHTTPError(http.StatusUnauthorized, "RSA key attestation check failed: %v", err)
-	}
-
-	appID := applyDebugOverride(c, claims.AppID, debugMode)
-	if appID == "" {
-		return "", "", newHTTPError(http.StatusBadRequest, "appID query parameter is only allowed in debug mode")
-	}
-
-	return appID, claims.ImageDigest, nil
 }
 
 func handleAttestV3(
@@ -197,17 +133,4 @@ func handleAttestV3(
 	}
 
 	return appID, result.Container.ImageDigest, nil
-}
-
-// applyDebugOverride checks for the debug appID query parameter and applies it if in debug mode.
-// Returns the final appID, or empty string if a debug override was requested but debug mode is off.
-func applyDebugOverride(c echo.Context, appID string, debugMode bool) string {
-	debugAppID := strings.ToLower(c.QueryParam("appID"))
-	if debugAppID != "" {
-		if debugMode {
-			return debugAppID
-		}
-		return ""
-	}
-	return appID
 }

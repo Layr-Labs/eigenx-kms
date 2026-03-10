@@ -165,7 +165,7 @@ func runServer(c *cli.Context) error {
 		cfg.Logger.Info("Attestation JWT signing enabled", "expiration", cfg.AttestJWTExpiration)
 
 		e.POST("/auth/attest", func(c echo.Context) error {
-			return handlers.HandleAttest(c, cfg.Logger, jwtSigner, attestationVerifier, attestationEvidenceVerifier, policyChecker, kmsClient, cfg.Debug)
+			return handlers.HandleAttest(c, cfg.Logger, jwtSigner, attestationEvidenceVerifier, policyChecker, kmsClient, cfg.Debug)
 		}, middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(cfg.EnvRateLimit))))
 	}
 

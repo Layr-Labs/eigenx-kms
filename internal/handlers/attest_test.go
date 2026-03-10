@@ -5,7 +5,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -16,7 +15,6 @@ import (
 	"github.com/Layr-Labs/eigenx-kms/internal/auth"
 	"github.com/Layr-Labs/eigenx-kms/internal/kms/fakes"
 	"github.com/Layr-Labs/eigenx-kms/pkg/attestation"
-	attestationMocks "github.com/Layr-Labs/eigenx-kms/pkg/attestation/mocks"
 	"github.com/Layr-Labs/eigenx-kms/pkg/crypto"
 	policyMocks "github.com/Layr-Labs/eigenx-kms/pkg/policy/mocks"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
@@ -46,295 +44,26 @@ func TestHandleAttest_InvalidJSON(t *testing.T) {
 
 	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", []byte("{invalid"))
 
-	err := HandleAttest(c, logger, signer, nil, nil, nil, nil, false)
+	err := HandleAttest(c, logger, signer, nil, nil, nil, false)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	requireErrorResponse(t, rec, "Failed to parse attest request")
 }
 
-func TestHandleAttest_InvalidVersion(t *testing.T) {
+func TestHandleAttest_UnsupportedVersion(t *testing.T) {
 	logger := setupEnvLogger()
 	signer := createTestJWTSigner(t)
 
-	body, _ := json.Marshal(types.AttestRequest{Version: 99})
-	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
+	for _, version := range []int{0, 1, 2, 99} {
+		body, _ := json.Marshal(types.AttestRequest{Version: version})
+		c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
 
-	err := HandleAttest(c, logger, signer, nil, nil, nil, nil, false)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	requireErrorResponse(t, rec, "Unsupported attestation version: 99")
+		err := HandleAttest(c, logger, signer, nil, nil, nil, false)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		requireErrorResponse(t, rec, "Unsupported attestation version")
+	}
 }
-
-// --- V1 tests ---
-
-func TestHandleAttest_V1_AttestationFailure(t *testing.T) {
-	logger := setupEnvLogger()
-	signer := createTestJWTSigner(t)
-
-	fakeKMS, err := fakes.NewFakeKMS()
-	require.NoError(t, err)
-
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockAttestation := attestationMocks.NewMockAttestationVerifierInterface(ctrl)
-
-	mockJWT := `{"sub":"test-app","iat":1234567890}`
-	envReq, _, err := fakeKMS.CreateValidEncryptedRequestV1(mockJWT)
-	require.NoError(t, err)
-
-	attestReq := types.AttestRequest{
-		Version:                1,
-		EncryptedJWTWithRSAKey: envReq.EncryptedJWTWithRSAKey,
-	}
-	body, _ := json.Marshal(attestReq)
-	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
-
-	mockAttestation.EXPECT().
-		VerifyAttestation(gomock.Any(), gomock.Any(), attestation.GoogleConfidentialSpace).
-		Return(nil, errors.New("attestation failed"))
-
-	err = HandleAttest(c, logger, signer, mockAttestation, nil, nil, fakeKMS, false)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusUnauthorized, rec.Code)
-	requireErrorResponse(t, rec, "Attestation verification failed")
-}
-
-func TestHandleAttest_V1_Success(t *testing.T) {
-	logger := setupEnvLogger()
-	signer := createTestJWTSigner(t)
-
-	fakeKMS, err := fakes.NewFakeKMS()
-	require.NoError(t, err)
-
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockAttestation := attestationMocks.NewMockAttestationVerifierInterface(ctrl)
-
-	mockJWT := `{"sub":"test-app","iat":1234567890}`
-	envReq, _, err := fakeKMS.CreateValidEncryptedRequestV1(mockJWT)
-	require.NoError(t, err)
-
-	attestReq := types.AttestRequest{
-		Version:                1,
-		EncryptedJWTWithRSAKey: envReq.EncryptedJWTWithRSAKey,
-	}
-	body, _ := json.Marshal(attestReq)
-	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
-
-	claims := &attestation.AttestationClaims{
-		AppID:       testEnvAppID,
-		ImageDigest: testValidDigest,
-		Nonce:       "",
-	}
-	mockAttestation.EXPECT().
-		VerifyAttestation(gomock.Any(), gomock.Any(), attestation.GoogleConfidentialSpace).
-		Return(claims, nil)
-
-	err = HandleAttest(c, logger, signer, mockAttestation, nil, nil, fakeKMS, false)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	// Verify JWT claims
-	var signedResponse types.SignedResponse[types.AttestResponse]
-	err = json.Unmarshal(rec.Body.Bytes(), &signedResponse)
-	require.NoError(t, err)
-	require.NotEmpty(t, signedResponse.Data.Token)
-
-	parsed, err := jwt.Parse([]byte(signedResponse.Data.Token), jwt.WithKey(jwa.RS256(), signer.PublicKey()))
-	require.NoError(t, err)
-
-	sub, ok := parsed.Subject()
-	require.True(t, ok)
-	require.Equal(t, testEnvAppID, sub)
-
-	var gotAppID string
-	require.NoError(t, parsed.Get("appId", &gotAppID))
-	require.Equal(t, testEnvAppID, gotAppID)
-
-	var gotDigest string
-	require.NoError(t, parsed.Get("imageDigest", &gotDigest))
-	require.Equal(t, testValidDigest, gotDigest)
-}
-
-func TestHandleAttest_V1_NonceRejected(t *testing.T) {
-	logger := setupEnvLogger()
-	signer := createTestJWTSigner(t)
-
-	fakeKMS, err := fakes.NewFakeKMS()
-	require.NoError(t, err)
-
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockAttestation := attestationMocks.NewMockAttestationVerifierInterface(ctrl)
-
-	mockJWT := `{"sub":"test-app","iat":1234567890}`
-	envReq, _, err := fakeKMS.CreateValidEncryptedRequestV1(mockJWT)
-	require.NoError(t, err)
-
-	attestReq := types.AttestRequest{
-		Version:                1,
-		EncryptedJWTWithRSAKey: envReq.EncryptedJWTWithRSAKey,
-	}
-	body, _ := json.Marshal(attestReq)
-	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
-
-	claims := &attestation.AttestationClaims{
-		AppID:       testEnvAppID,
-		ImageDigest: testValidDigest,
-		Nonce:       "some-nonce",
-	}
-	mockAttestation.EXPECT().
-		VerifyAttestation(gomock.Any(), gomock.Any(), attestation.GoogleConfidentialSpace).
-		Return(claims, nil)
-
-	err = HandleAttest(c, logger, signer, mockAttestation, nil, nil, fakeKMS, false)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	requireErrorResponse(t, rec, "nonce should be empty for v1 attestation requests")
-}
-
-// --- V2 tests ---
-
-func TestHandleAttest_V2_AttestationFailure(t *testing.T) {
-	logger := setupEnvLogger()
-	signer := createTestJWTSigner(t)
-
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockAttestation := attestationMocks.NewMockAttestationVerifierInterface(ctrl)
-
-	_, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
-	require.NoError(t, err)
-
-	attestReq := types.AttestRequest{
-		Version:               2,
-		JWTWithAttestedRSAKey: "mock-jwt",
-		RSAKeyPEM:             string(clientRSAPublicPEM),
-	}
-	body, _ := json.Marshal(attestReq)
-	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
-
-	mockAttestation.EXPECT().
-		VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
-		Return(nil, errors.New("attestation failed"))
-
-	err = HandleAttest(c, logger, signer, mockAttestation, nil, nil, nil, false)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusUnauthorized, rec.Code)
-	requireErrorResponse(t, rec, "Attestation verification failed")
-}
-
-func TestHandleAttest_V2_InvalidRSAKeySize(t *testing.T) {
-	logger := setupEnvLogger()
-	signer := createTestJWTSigner(t)
-
-	smallKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-	smallPubBytes, err := x509.MarshalPKIXPublicKey(&smallKey.PublicKey)
-	require.NoError(t, err)
-	smallPubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: smallPubBytes})
-
-	attestReq := types.AttestRequest{
-		Version:               2,
-		JWTWithAttestedRSAKey: "mock-jwt",
-		RSAKeyPEM:             string(smallPubPEM),
-	}
-	body, _ := json.Marshal(attestReq)
-	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
-
-	err = HandleAttest(c, logger, signer, nil, nil, nil, nil, false)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	requireErrorResponse(t, rec, "encryption key size mismatch")
-}
-
-func TestHandleAttest_V2_RSAKeyAttestationMismatch(t *testing.T) {
-	logger := setupEnvLogger()
-	signer := createTestJWTSigner(t)
-
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockAttestation := attestationMocks.NewMockAttestationVerifierInterface(ctrl)
-
-	_, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
-	require.NoError(t, err)
-
-	attestReq := types.AttestRequest{
-		Version:               2,
-		JWTWithAttestedRSAKey: "mock-jwt",
-		RSAKeyPEM:             string(clientRSAPublicPEM),
-	}
-	body, _ := json.Marshal(attestReq)
-	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
-
-	claims := &attestation.AttestationClaims{
-		AppID:       testEnvAppID,
-		ImageDigest: testValidDigest,
-		Nonce:       "wrong-nonce",
-	}
-	mockAttestation.EXPECT().
-		VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
-		Return(claims, nil)
-
-	err = HandleAttest(c, logger, signer, mockAttestation, nil, nil, nil, false)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusUnauthorized, rec.Code)
-	requireErrorResponse(t, rec, "RSA key attestation check failed")
-}
-
-func TestHandleAttest_V2_Success(t *testing.T) {
-	logger := setupEnvLogger()
-	signer := createTestJWTSigner(t)
-
-	fakeKMS, err := fakes.NewFakeKMS()
-	require.NoError(t, err)
-
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockAttestation := attestationMocks.NewMockAttestationVerifierInterface(ctrl)
-
-	_, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
-	require.NoError(t, err)
-
-	// Calculate expected nonce
-	hashBytes := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, clientRSAPublicPEM)
-	expectedNonce := encodeHex(hashBytes)
-
-	attestReq := types.AttestRequest{
-		Version:               2,
-		JWTWithAttestedRSAKey: "mock-jwt",
-		RSAKeyPEM:             string(clientRSAPublicPEM),
-	}
-	body, _ := json.Marshal(attestReq)
-	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
-
-	claims := &attestation.AttestationClaims{
-		AppID:       testEnvAppID,
-		ImageDigest: testValidDigest,
-		Nonce:       expectedNonce,
-	}
-	mockAttestation.EXPECT().
-		VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
-		Return(claims, nil)
-
-	err = HandleAttest(c, logger, signer, mockAttestation, nil, nil, fakeKMS, false)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	// Verify JWT claims
-	var signedResponse types.SignedResponse[types.AttestResponse]
-	err = json.Unmarshal(rec.Body.Bytes(), &signedResponse)
-	require.NoError(t, err)
-
-	parsed, err := jwt.Parse([]byte(signedResponse.Data.Token), jwt.WithKey(jwa.RS256(), signer.PublicKey()))
-	require.NoError(t, err)
-
-	sub, ok := parsed.Subject()
-	require.True(t, ok)
-	require.Equal(t, testEnvAppID, sub)
-}
-
-// --- V3 tests ---
 
 func TestHandleAttest_V3_AttestationFailure(t *testing.T) {
 	logger := setupEnvLogger()
@@ -358,7 +87,7 @@ func TestHandleAttest_V3_AttestationFailure(t *testing.T) {
 	body, _ := json.Marshal(attestReq)
 	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
 
-	err = HandleAttest(c, logger, signer, nil, verifier, nil, fakeKMS, false)
+	err = HandleAttest(c, logger, signer, verifier, nil, fakeKMS, false)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 	requireErrorResponse(t, rec, "Attestation verification failed")
@@ -394,7 +123,7 @@ func TestHandleAttest_V3_PolicyFailure(t *testing.T) {
 	body, _ := json.Marshal(attestReq)
 	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
 
-	err = HandleAttest(c, logger, signer, nil, verifier, mockPolicy, fakeKMS, false)
+	err = HandleAttest(c, logger, signer, verifier, mockPolicy, fakeKMS, false)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 	requireErrorResponse(t, rec, "TPM policy check failed")
@@ -425,7 +154,7 @@ func TestHandleAttest_V3_MissingGCEInfo(t *testing.T) {
 	body, _ := json.Marshal(attestReq)
 	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
 
-	err = HandleAttest(c, logger, signer, nil, verifier, nil, fakeKMS, false)
+	err = HandleAttest(c, logger, signer, verifier, nil, fakeKMS, false)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 	requireErrorResponse(t, rec, "GCE instance info not found in attestation")
@@ -458,7 +187,7 @@ func TestHandleAttest_V3_MissingContainerInfo(t *testing.T) {
 	body, _ := json.Marshal(attestReq)
 	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
 
-	err = HandleAttest(c, logger, signer, nil, verifier, nil, fakeKMS, false)
+	err = HandleAttest(c, logger, signer, verifier, nil, fakeKMS, false)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 	requireErrorResponse(t, rec, "Container info not found in attestation")
@@ -475,7 +204,7 @@ func TestHandleAttest_V3_Success(t *testing.T) {
 	defer ctrl.Finish()
 	mockPolicy := policyMocks.NewMockPolicyCheckerInterface(ctrl)
 
-	_, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
+	clientRSAPrivatePEM, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
 	require.NoError(t, err)
 
 	verifier := &stubBoundAttestationEvidenceVerifier{
@@ -494,16 +223,31 @@ func TestHandleAttest_V3_Success(t *testing.T) {
 	body, _ := json.Marshal(attestReq)
 	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
 
-	err = HandleAttest(c, logger, signer, nil, verifier, mockPolicy, fakeKMS, false)
+	err = HandleAttest(c, logger, signer, verifier, mockPolicy, fakeKMS, false)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	// Verify JWT claims
+	// Parse signed response
 	var signedResponse types.SignedResponse[types.AttestResponse]
 	err = json.Unmarshal(rec.Body.Bytes(), &signedResponse)
 	require.NoError(t, err)
+	require.NotEmpty(t, signedResponse.Data.EncryptedToken)
 
-	parsed, err := jwt.Parse([]byte(signedResponse.Data.Token), jwt.WithKey(jwa.RS256(), signer.PublicKey()))
+	// Decrypt the token
+	rsaPrivateKey, err := crypto.RSAPrivateKeyFromPEM(clientRSAPrivatePEM)
+	require.NoError(t, err)
+	decryptedBytes, err := crypto.DecryptWithRSAOAEPAndAES256GCM(rsaPrivateKey, []byte(signedResponse.Data.EncryptedToken))
+	require.NoError(t, err)
+
+	var tokenPayload map[string]string
+	err = json.Unmarshal(decryptedBytes, &tokenPayload)
+	require.NoError(t, err)
+
+	tokenStr := tokenPayload["token"]
+	require.NotEmpty(t, tokenStr)
+
+	// Verify JWT claims
+	parsed, err := jwt.Parse([]byte(tokenStr), jwt.WithKey(jwa.RS256(), signer.PublicKey()))
 	require.NoError(t, err)
 
 	sub, ok := parsed.Subject()
@@ -513,6 +257,63 @@ func TestHandleAttest_V3_Success(t *testing.T) {
 	var gotDigest string
 	require.NoError(t, parsed.Get("imageDigest", &gotDigest))
 	require.Equal(t, testValidDigest, gotDigest)
+}
+
+func TestHandleAttest_V3_WithAudience(t *testing.T) {
+	logger := setupEnvLogger()
+	signer := createTestJWTSigner(t)
+
+	fakeKMS, err := fakes.NewFakeKMS()
+	require.NoError(t, err)
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockPolicy := policyMocks.NewMockPolicyCheckerInterface(ctrl)
+
+	clientRSAPrivatePEM, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	verifier := &stubBoundAttestationEvidenceVerifier{
+		result: gcpTPMClaims(testEnvAppID, testValidDigest),
+	}
+
+	mockPolicy.EXPECT().
+		CheckTPMPolicies(gomock.Any(), gomock.Any()).
+		Return(nil)
+
+	attestReq := types.AttestRequest{
+		Version:     3,
+		Attestation: base64.StdEncoding.EncodeToString([]byte("dummy")),
+		RSAKeyPEM:   string(clientRSAPublicPEM),
+		Audience:    "test-audience",
+	}
+	body, _ := json.Marshal(attestReq)
+	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
+
+	err = HandleAttest(c, logger, signer, verifier, mockPolicy, fakeKMS, false)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Decrypt and verify audience claim
+	var signedResponse types.SignedResponse[types.AttestResponse]
+	err = json.Unmarshal(rec.Body.Bytes(), &signedResponse)
+	require.NoError(t, err)
+
+	rsaPrivateKey, err := crypto.RSAPrivateKeyFromPEM(clientRSAPrivatePEM)
+	require.NoError(t, err)
+	decryptedBytes, err := crypto.DecryptWithRSAOAEPAndAES256GCM(rsaPrivateKey, []byte(signedResponse.Data.EncryptedToken))
+	require.NoError(t, err)
+
+	var tokenPayload map[string]string
+	err = json.Unmarshal(decryptedBytes, &tokenPayload)
+	require.NoError(t, err)
+
+	parsed, err := jwt.Parse([]byte(tokenPayload["token"]), jwt.WithKey(jwa.RS256(), signer.PublicKey()))
+	require.NoError(t, err)
+
+	aud, ok := parsed.Audience()
+	require.True(t, ok)
+	require.Contains(t, aud, "test-audience")
 }
 
 func TestHandleAttest_V3_TEEPolicyFailure(t *testing.T) {
@@ -554,15 +355,13 @@ func TestHandleAttest_V3_TEEPolicyFailure(t *testing.T) {
 	body, _ := json.Marshal(attestReq)
 	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
 
-	err = HandleAttest(c, logger, signer, nil, verifier, mockPolicy, fakeKMS, false)
+	err = HandleAttest(c, logger, signer, verifier, mockPolicy, fakeKMS, false)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 	requireErrorResponse(t, rec, "TEE policy check failed")
 }
 
-// --- Debug mode tests ---
-
-func TestHandleAttest_V2_DebugOverride(t *testing.T) {
+func TestHandleAttest_V3_DebugOverride(t *testing.T) {
 	logger := setupEnvLogger()
 	signer := createTestJWTSigner(t)
 
@@ -571,33 +370,29 @@ func TestHandleAttest_V2_DebugOverride(t *testing.T) {
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-	mockAttestation := attestationMocks.NewMockAttestationVerifierInterface(ctrl)
+	mockPolicy := policyMocks.NewMockPolicyCheckerInterface(ctrl)
 
-	_, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
+	clientRSAPrivatePEM, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
 	require.NoError(t, err)
 
-	hashBytes := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, clientRSAPublicPEM)
-	expectedNonce := encodeHex(hashBytes)
-
-	claims := &attestation.AttestationClaims{
-		AppID:       "0x2222222222222222222222222222222222222222",
-		ImageDigest: testValidDigest,
-		Nonce:       expectedNonce,
+	verifier := &stubBoundAttestationEvidenceVerifier{
+		result: gcpTPMClaims(testEnvAppID, testValidDigest),
 	}
-	mockAttestation.EXPECT().
-		VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
-		Return(claims, nil)
+
+	mockPolicy.EXPECT().
+		CheckTPMPolicies(gomock.Any(), gomock.Any()).
+		Return(nil)
 
 	overrideAppID := "0x9999999999999999999999999999999999999999"
 	attestReq := types.AttestRequest{
-		Version:               2,
-		JWTWithAttestedRSAKey: "mock-jwt",
-		RSAKeyPEM:             string(clientRSAPublicPEM),
+		Version:     3,
+		Attestation: base64.StdEncoding.EncodeToString([]byte("dummy")),
+		RSAKeyPEM:   string(clientRSAPublicPEM),
 	}
 	body, _ := json.Marshal(attestReq)
 	c, rec := setupEchoContextWithBodyAndQuery(http.MethodPost, "/auth/attest", body, map[string]string{"appID": overrideAppID})
 
-	err = HandleAttest(c, logger, signer, mockAttestation, nil, nil, fakeKMS, true)
+	err = HandleAttest(c, logger, signer, verifier, mockPolicy, fakeKMS, true)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code)
 
@@ -605,7 +400,16 @@ func TestHandleAttest_V2_DebugOverride(t *testing.T) {
 	err = json.Unmarshal(rec.Body.Bytes(), &signedResponse)
 	require.NoError(t, err)
 
-	parsed, err := jwt.Parse([]byte(signedResponse.Data.Token), jwt.WithKey(jwa.RS256(), signer.PublicKey()))
+	rsaPrivateKey, err := crypto.RSAPrivateKeyFromPEM(clientRSAPrivatePEM)
+	require.NoError(t, err)
+	decryptedBytes, err := crypto.DecryptWithRSAOAEPAndAES256GCM(rsaPrivateKey, []byte(signedResponse.Data.EncryptedToken))
+	require.NoError(t, err)
+
+	var tokenPayload map[string]string
+	err = json.Unmarshal(decryptedBytes, &tokenPayload)
+	require.NoError(t, err)
+
+	parsed, err := jwt.Parse([]byte(tokenPayload["token"]), jwt.WithKey(jwa.RS256(), signer.PublicKey()))
 	require.NoError(t, err)
 
 	var gotAppID string
@@ -613,7 +417,7 @@ func TestHandleAttest_V2_DebugOverride(t *testing.T) {
 	require.Equal(t, overrideAppID, gotAppID)
 }
 
-func TestHandleAttest_V2_DebugOverrideRejectedInNonDebugMode(t *testing.T) {
+func TestHandleAttest_V3_DebugOverrideRejectedInNonDebugMode(t *testing.T) {
 	logger := setupEnvLogger()
 	signer := createTestJWTSigner(t)
 
@@ -622,36 +426,25 @@ func TestHandleAttest_V2_DebugOverrideRejectedInNonDebugMode(t *testing.T) {
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-	mockAttestation := attestationMocks.NewMockAttestationVerifierInterface(ctrl)
+	mockPolicy := policyMocks.NewMockPolicyCheckerInterface(ctrl)
+
 	_, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
 	require.NoError(t, err)
 
-	hashBytes := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, clientRSAPublicPEM)
-	expectedNonce := encodeHex(hashBytes)
-
-	claims := &attestation.AttestationClaims{
-		AppID:       testEnvAppID,
-		ImageDigest: testValidDigest,
-		Nonce:       expectedNonce,
+	verifier := &stubBoundAttestationEvidenceVerifier{
+		result: gcpTPMClaims(testEnvAppID, testValidDigest),
 	}
-	mockAttestation.EXPECT().
-		VerifyAttestation(gomock.Any(), gomock.Any(), attestation.IntelTrustAuthority).
-		Return(claims, nil)
 
 	attestReq := types.AttestRequest{
-		Version:               2,
-		JWTWithAttestedRSAKey: "mock-jwt",
-		RSAKeyPEM:             string(clientRSAPublicPEM),
+		Version:     3,
+		Attestation: base64.StdEncoding.EncodeToString([]byte("dummy")),
+		RSAKeyPEM:   string(clientRSAPublicPEM),
 	}
 	body, _ := json.Marshal(attestReq)
 	c, rec := setupEchoContextWithBodyAndQuery(http.MethodPost, "/auth/attest", body, map[string]string{"appID": "0x999"})
 
-	err = HandleAttest(c, logger, signer, mockAttestation, nil, nil, fakeKMS, false)
+	err = HandleAttest(c, logger, signer, verifier, mockPolicy, fakeKMS, false)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	requireErrorResponse(t, rec, "appID query parameter is only allowed in debug mode")
-}
-
-func encodeHex(b []byte) string {
-	return hex.EncodeToString(b)
 }

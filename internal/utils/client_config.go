@@ -21,6 +21,7 @@ type AttestConfig struct {
 	KMSSigningKey string
 	LogLevel      string
 	OutputFile    string
+	Audience      string
 	Logger        *slog.Logger
 }
 
@@ -30,6 +31,7 @@ func NewAttestConfigFromCLI(c *cli.Context) (*AttestConfig, error) {
 		KMSSigningKey: c.String(KMSSigningKeyFileFlag.Name),
 		LogLevel:      c.String(LogLevelFlag.Name),
 		OutputFile:    c.String(OutputFileFlag.Name),
+		Audience:      c.String(AudienceFlag.Name),
 	}
 
 	config.Logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: GetLogLevel(config.LogLevel)}))
@@ -39,6 +41,7 @@ func NewAttestConfigFromCLI(c *cli.Context) (*AttestConfig, error) {
 		"kms_signing_key", config.KMSSigningKey,
 		"log_level", config.LogLevel,
 		"output_file", config.OutputFile,
+		"audience", config.Audience,
 	)
 
 	return config, nil

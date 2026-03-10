@@ -35,6 +35,7 @@ func main() {
 					utils.KMSSigningKeyFileFlag,
 					utils.LogLevelFlag,
 					utils.OutputFileFlag,
+					utils.AudienceFlag,
 				},
 				Action: runAttest,
 			},
@@ -101,7 +102,7 @@ func runAttest(c *cli.Context) error {
 	attestationProvider := envclient.NewBoundEvidenceProvider(cfg.Logger)
 
 	envClient := envclient.NewEnvClient(cfg.Logger, attestationProvider, kmsSigningKeyBytes, cfg.ServerURL, "")
-	token, err := envClient.Attest(ctx)
+	token, err := envClient.Attest(ctx, cfg.Audience)
 	if err != nil {
 		return fmt.Errorf("failed to get attestation JWT: %w", err)
 	}

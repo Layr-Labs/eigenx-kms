@@ -273,10 +273,10 @@ func (e *EnvClient) sendRequest(ctx context.Context, envRequest types.EnvRequest
 	return &signedResponse, nil
 }
 
-func (e *EnvClient) Attest(ctx context.Context) (string, error) {
+func (e *EnvClient) Attest(ctx context.Context, audience string) (string, error) {
 	// Generate RSA key pair on the fly
 	e.Logger.Info("Generating RSA key pair for attestation")
-	_, rsaPublicKeyPEM, err := crypto.GenerateRSAKeyPair()
+	rsaPrivateKeyPEM, rsaPublicKeyPEM, err := crypto.GenerateRSAKeyPair()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate RSA key pair: %w", err)
 	}
@@ -298,6 +298,7 @@ func (e *EnvClient) Attest(ctx context.Context) (string, error) {
 		Version:     3,
 		Attestation: attestationBase64,
 		RSAKeyPEM:   string(rsaPublicKeyPEM),
+		Audience:    audience,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to send attest request: %w", err)
@@ -317,7 +318,30 @@ func (e *EnvClient) Attest(ctx context.Context) (string, error) {
 
 	e.Logger.Info("Signature verified successfully")
 
-	return response.Data.Token, nil
+	// Decrypt the encrypted token with the ephemeral RSA private key
+	e.Logger.Debug("Decrypting attestation token")
+	rsaPrivateKey, err := crypto.RSAPrivateKeyFromPEM(rsaPrivateKeyPEM)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse RSA private key: %w", err)
+	}
+	decryptedBytes, err := crypto.DecryptWithRSAOAEPAndAES256GCM(rsaPrivateKey, []byte(response.Data.EncryptedToken))
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt token: %w", err)
+	}
+
+	var tokenPayload map[string]string
+	if err := json.Unmarshal(decryptedBytes, &tokenPayload); err != nil {
+		return "", fmt.Errorf("failed to unmarshal decrypted token: %w", err)
+	}
+
+	token, ok := tokenPayload["token"]
+	if !ok {
+		return "", fmt.Errorf("decrypted payload missing 'token' field")
+	}
+
+	e.Logger.Info("Attestation token decrypted successfully")
+
+	return token, nil
 }
 
 func (e *EnvClient) sendAttestRequest(ctx context.Context, attestRequest types.AttestRequest) (*types.SignedResponse[types.AttestResponse], error) {

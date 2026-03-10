@@ -29,7 +29,7 @@ func NewJWTSigner(privateKeyPEM string, expiration time.Duration) (*JWTSigner, e
 	}, nil
 }
 
-func (s *JWTSigner) SignAttestationJWT(appID, imageDigest string) (string, error) {
+func (s *JWTSigner) SignAttestationJWT(appID, imageDigest, audience string) (string, error) {
 	now := time.Now()
 
 	token := jwt.New()
@@ -44,6 +44,11 @@ func (s *JWTSigner) SignAttestationJWT(appID, imageDigest string) (string, error
 	}
 	if err := token.Set(jwt.ExpirationKey, now.Add(s.expiration)); err != nil {
 		return "", fmt.Errorf("failed to set expiration: %w", err)
+	}
+	if audience != "" {
+		if err := token.Set(jwt.AudienceKey, audience); err != nil {
+			return "", fmt.Errorf("failed to set audience: %w", err)
+		}
 	}
 	if err := token.Set("appId", appID); err != nil {
 		return "", fmt.Errorf("failed to set appId: %w", err)
