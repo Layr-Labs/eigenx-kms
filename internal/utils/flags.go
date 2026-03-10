@@ -165,6 +165,19 @@ var (
 		EnvVars: []string{"ATTEST_JWT_EXPIRATION"},
 	}
 
+	AttestJWTSigningKeySourceFlag = &cli.StringFlag{
+		Name:    "attest-jwt-signing-key-source",
+		Value:   "direct",
+		Usage:   "Source for attestation JWT signing key: 'direct' (from env/flag) or 'secret-manager' (from GCP Secret Manager)",
+		EnvVars: []string{"ATTEST_JWT_SIGNING_KEY_SOURCE"},
+	}
+
+	AttestJWTSigningKeySecretFlag = &cli.StringFlag{
+		Name:    "attest-jwt-signing-key-secret",
+		Usage:   "GCP Secret Manager resource name (e.g. projects/my-project/secrets/my-secret/versions/latest)",
+		EnvVars: []string{"ATTEST_JWT_SIGNING_KEY_SECRET"},
+	}
+
 	AudienceFlag = &cli.StringFlag{
 		Name:    "audience",
 		Usage:   "JWT audience claim for attestation token",
