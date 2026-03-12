@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Layr-Labs/eigenx-kms/pkg/attestation"
+	"github.com/Layr-Labs/go-tpm-tools/sdk/attest"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/stretchr/testify/require"
@@ -55,6 +57,29 @@ func TestNewJWTSigner_InvalidPEM(t *testing.T) {
 	require.Contains(t, err.Error(), "no PEM block found")
 }
 
+func testVerifiedAttestation(appID, imageDigest string) *attestation.VerifiedAttestation {
+	return &attestation.VerifiedAttestation{
+		TPMClaims: &attest.TPMClaims{
+			Hardened: true,
+			GCE: &attest.GCEInfo{
+				InstanceName:  "app-" + appID,
+				ProjectID:     "test-project",
+				ProjectNumber: 12345,
+				Zone:          "us-central1-a",
+				InstanceID:    67890,
+			},
+		},
+		Container: &attest.ContainerInfo{
+			ImageReference: "gcr.io/test/image",
+			ImageDigest:    imageDigest,
+			ImageID:        "sha256:imageid",
+			RestartPolicy:  "Never",
+		},
+		TEEClaims: nil,
+		Platform:  attest.PlatformGCPShieldedVM,
+	}
+}
+
 func TestSignAttestationJWT_Claims(t *testing.T) {
 	pemStr := generateTestPKCS1PEM(t, 2048)
 	expiration := 24 * time.Hour
@@ -63,9 +88,10 @@ func TestSignAttestationJWT_Claims(t *testing.T) {
 
 	appID := "0x1234567890abcdef1234567890abcdef12345678"
 	imageDigest := "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+	verified := testVerifiedAttestation(appID, imageDigest)
 
 	audience := "test-audience"
-	tokenStr, err := signer.SignAttestationJWT(appID, imageDigest, audience)
+	tokenStr, err := signer.SignAttestationJWT(appID, verified, audience)
 	require.NoError(t, err)
 	require.NotEmpty(t, tokenStr)
 
@@ -101,9 +127,35 @@ func TestSignAttestationJWT_Claims(t *testing.T) {
 	require.NoError(t, parsed.Get("appId", &gotAppID))
 	require.Equal(t, appID, gotAppID)
 
-	var gotDigest string
-	require.NoError(t, parsed.Get("imageDigest", &gotDigest))
-	require.Equal(t, imageDigest, gotDigest)
+	// Check rich claims
+	var gotHWModel string
+	require.NoError(t, parsed.Get("hwmodel", &gotHWModel))
+	require.Equal(t, "GCP_SHIELDED_VM", gotHWModel)
+
+	var gotPlatform string
+	require.NoError(t, parsed.Get("platform", &gotPlatform))
+	require.Equal(t, "GCP_SHIELDED_VM", gotPlatform)
+
+	var gotHardened bool
+	require.NoError(t, parsed.Get("hardened", &gotHardened))
+	require.True(t, gotHardened)
+
+	var gotSecBoot bool
+	require.NoError(t, parsed.Get("secboot", &gotSecBoot))
+	require.True(t, gotSecBoot)
+
+	// Check submods
+	var gotSubmods map[string]interface{}
+	require.NoError(t, parsed.Get("submods", &gotSubmods))
+	require.Contains(t, gotSubmods, "container")
+	require.Contains(t, gotSubmods, "gce")
+
+	container := gotSubmods["container"].(map[string]interface{})
+	require.Equal(t, imageDigest, container["image_digest"])
+	require.Equal(t, "gcr.io/test/image", container["image_reference"])
+
+	gce := gotSubmods["gce"].(map[string]interface{})
+	require.Equal(t, "test-project", gce["project_id"])
 }
 
 func TestSignAttestationJWT_VerifiableWithPublicKey(t *testing.T) {
@@ -111,7 +163,8 @@ func TestSignAttestationJWT_VerifiableWithPublicKey(t *testing.T) {
 	signer, err := NewJWTSigner(pemStr, time.Hour)
 	require.NoError(t, err)
 
-	tokenStr, err := signer.SignAttestationJWT("app1", "sha256:abc123", "")
+	verified := testVerifiedAttestation("app1", "sha256:abc123")
+	tokenStr, err := signer.SignAttestationJWT("app1", verified, "")
 	require.NoError(t, err)
 
 	// Verification should succeed with the correct public key

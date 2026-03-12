@@ -21,6 +21,7 @@ import (
 var (
 	KMSSignatureHeader        = []byte("COMPUTE_APP_KMS_SIGNATURE_V1")
 	EnvRequestRSAKeyHeader    = []byte("COMPUTE_APP_ENV_REQUEST_RSA_KEY_V1")
+	JWTRequestRSAKeyHeader    = []byte("COMPUTE_APP_JWT_REQUEST_RSA_KEY_V1")
 	AppDerivedAddressesHeader = []byte("COMPUTE_APP_DERIVED_ADDRESSES_V1")
 	JWEAppIDHeader            = "x-eigenx-app-id"
 )
