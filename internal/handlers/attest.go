@@ -53,7 +53,7 @@ func HandleAttest(
 		return returnError(c, logger, http.StatusBadRequest, fmt.Sprintf("Unsupported attestation version: %d, only version 3 is supported", req.Version))
 	}
 
-	appID, imageDigest, err := handleAttestV3(ctx, c, attestationEvidenceVerifier, policyChecker, req, debugMode)
+	appID, verified, err := handleAttestV3(ctx, c, attestationEvidenceVerifier, policyChecker, req, debugMode)
 	if err != nil {
 		if httpErr, ok := err.(*httpError); ok {
 			return returnError(c, logger, httpErr.statusCode, httpErr.message)
@@ -61,7 +61,7 @@ func HandleAttest(
 		return returnError(c, logger, http.StatusInternalServerError, err.Error())
 	}
 
-	token, err := jwtSigner.SignAttestationJWT(appID, imageDigest, req.Audience)
+	token, err := jwtSigner.SignAttestationJWT(appID, verified, req.Audience)
 	if err != nil {
 		return returnError(c, logger, http.StatusInternalServerError, fmt.Sprintf("Failed to sign attestation JWT: %v", err))
 	}
@@ -88,49 +88,49 @@ func handleAttestV3(
 	policyChecker policy.PolicyCheckerInterface,
 	req types.AttestRequest,
 	debugMode bool,
-) (string, string, error) {
+) (string, *attestation.VerifiedAttestation, error) {
 	if err := crypto.ValidateRSAKeySize([]byte(req.RSAKeyPEM)); err != nil {
-		return "", "", newHTTPError(http.StatusBadRequest, "encryption key size mismatch: %v", err)
+		return "", nil, newHTTPError(http.StatusBadRequest, "encryption key size mismatch: %v", err)
 	}
 
 	attestationBytes, err := base64.StdEncoding.DecodeString(req.Attestation)
 	if err != nil {
-		return "", "", newHTTPError(http.StatusBadRequest, "Failed to decode attestation: %v", err)
+		return "", nil, newHTTPError(http.StatusBadRequest, "Failed to decode attestation: %v", err)
 	}
 
-	challenge := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, []byte(req.RSAKeyPEM))
+	challenge := crypto.CalculateSignableDigest(crypto.JWTRequestRSAKeyHeader, []byte(req.RSAKeyPEM))
 
 	result, err := attestationEvidenceVerifier.Verify(ctx, attestationBytes, challenge)
 	if err != nil {
-		return "", "", newHTTPError(http.StatusUnauthorized, "Attestation verification failed: %v", err)
+		return "", nil, newHTTPError(http.StatusUnauthorized, "Attestation verification failed: %v", err)
 	}
 
 	if result.TPMClaims.GCE == nil {
-		return "", "", newHTTPError(http.StatusUnauthorized, "GCE instance info not found in attestation")
+		return "", nil, newHTTPError(http.StatusUnauthorized, "GCE instance info not found in attestation")
 	}
 	if result.Container == nil {
-		return "", "", newHTTPError(http.StatusUnauthorized, "Container info not found in attestation")
+		return "", nil, newHTTPError(http.StatusUnauthorized, "Container info not found in attestation")
 	}
 
 	appID, err := utils.ExtractAppIDFromInstanceName(result.TPMClaims.GCE.InstanceName)
 	if err != nil {
-		return "", "", newHTTPError(http.StatusUnauthorized, "Failed to extract app ID: %v", err)
+		return "", nil, newHTTPError(http.StatusUnauthorized, "Failed to extract app ID: %v", err)
 	}
 
 	appID = applyDebugOverride(c, appID, debugMode)
 	if appID == "" {
-		return "", "", newHTTPError(http.StatusBadRequest, "appID query parameter is only allowed in debug mode")
+		return "", nil, newHTTPError(http.StatusBadRequest, "appID query parameter is only allowed in debug mode")
 	}
 
 	if err := policyChecker.CheckTPMPolicies(ctx, result.TPMClaims); err != nil {
-		return "", "", newHTTPError(http.StatusUnauthorized, "TPM policy check failed: %v", err)
+		return "", nil, newHTTPError(http.StatusUnauthorized, "TPM policy check failed: %v", err)
 	}
 
 	if result.TEEClaims != nil {
 		if err := policyChecker.CheckTEEPolicies(ctx, result.TEEClaims); err != nil {
-			return "", "", newHTTPError(http.StatusUnauthorized, "TEE policy check failed: %v", err)
+			return "", nil, newHTTPError(http.StatusUnauthorized, "TEE policy check failed: %v", err)
 		}
 	}
 
-	return appID, result.Container.ImageDigest, nil
+	return appID, result, nil
 }

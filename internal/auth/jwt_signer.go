@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Layr-Labs/eigenx-kms/pkg/attestation"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 )
@@ -29,8 +30,9 @@ func NewJWTSigner(privateKeyPEM string, expiration time.Duration) (*JWTSigner, e
 	}, nil
 }
 
-func (s *JWTSigner) SignAttestationJWT(appID, imageDigest, audience string) (string, error) {
+func (s *JWTSigner) SignAttestationJWT(appID string, verified *attestation.VerifiedAttestation, audience string) (string, error) {
 	now := time.Now()
+	claims := NewAttestationJWTClaims(appID, verified)
 
 	token := jwt.New()
 	if err := token.Set(jwt.IssuerKey, jwtIssuer); err != nil {
@@ -50,11 +52,35 @@ func (s *JWTSigner) SignAttestationJWT(appID, imageDigest, audience string) (str
 			return "", fmt.Errorf("failed to set audience: %w", err)
 		}
 	}
-	if err := token.Set("appId", appID); err != nil {
-		return "", fmt.Errorf("failed to set appId: %w", err)
+
+	// Set rich attestation claims
+	if err := token.Set("app_id", claims.AppID); err != nil {
+		return "", fmt.Errorf("failed to set app_id: %w", err)
 	}
-	if err := token.Set("imageDigest", imageDigest); err != nil {
-		return "", fmt.Errorf("failed to set imageDigest: %w", err)
+	if err := token.Set("secboot", claims.SecBoot); err != nil {
+		return "", fmt.Errorf("failed to set secboot: %w", err)
+	}
+	if err := token.Set("hwmodel", claims.HWModel); err != nil {
+		return "", fmt.Errorf("failed to set hwmodel: %w", err)
+	}
+	if err := token.Set("platform", claims.Platform); err != nil {
+		return "", fmt.Errorf("failed to set platform: %w", err)
+	}
+	if err := token.Set("hardened", claims.Hardened); err != nil {
+		return "", fmt.Errorf("failed to set hardened: %w", err)
+	}
+	if err := token.Set("submods", claims.SubMods); err != nil {
+		return "", fmt.Errorf("failed to set submods: %w", err)
+	}
+	if claims.TDX != nil {
+		if err := token.Set("tdx", claims.TDX); err != nil {
+			return "", fmt.Errorf("failed to set tdx: %w", err)
+		}
+	}
+	if claims.SevSnp != nil {
+		if err := token.Set("sevsnp", claims.SevSnp); err != nil {
+			return "", fmt.Errorf("failed to set sevsnp: %w", err)
+		}
 	}
 
 	signed, err := jwt.Sign(token, jwt.WithKey(jwa.RS256(), s.privateKey))

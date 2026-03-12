@@ -282,7 +282,7 @@ func (e *EnvClient) Attest(ctx context.Context, audience string) (string, error)
 	}
 
 	// Calculate RSA key hash for challenge
-	rsaKeyHash := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, rsaPublicKeyPEM)
+	rsaKeyHash := crypto.CalculateSignableDigest(crypto.JWTRequestRSAKeyHeader, rsaPublicKeyPEM)
 
 	// Request raw attestation with RSA key hash as challenge
 	e.Logger.Info("Requesting attestation")

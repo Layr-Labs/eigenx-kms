@@ -254,9 +254,11 @@ func TestHandleAttest_V3_Success(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, testEnvAppID, sub)
 
-	var gotDigest string
-	require.NoError(t, parsed.Get("imageDigest", &gotDigest))
-	require.Equal(t, testValidDigest, gotDigest)
+	// Verify rich claims
+	var gotSubmods map[string]interface{}
+	require.NoError(t, parsed.Get("submods", &gotSubmods))
+	container := gotSubmods["container"].(map[string]interface{})
+	require.Equal(t, testValidDigest, container["image_digest"])
 }
 
 func TestHandleAttest_V3_WithAudience(t *testing.T) {
@@ -413,7 +415,7 @@ func TestHandleAttest_V3_DebugOverride(t *testing.T) {
 	require.NoError(t, err)
 
 	var gotAppID string
-	require.NoError(t, parsed.Get("appId", &gotAppID))
+	require.NoError(t, parsed.Get("app_id", &gotAppID))
 	require.Equal(t, overrideAppID, gotAppID)
 }
 
