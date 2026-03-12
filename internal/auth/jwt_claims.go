@@ -14,7 +14,6 @@ type AttestationJWTClaims struct {
 	AppID    string  `json:"app_id"`
 	SecBoot  bool    `json:"secboot"`
 	HWModel  string  `json:"hwmodel"`
-	Platform string  `json:"platform"`
 	Hardened bool    `json:"hardened"`
 	SubMods  SubMods `json:"submods"`
 
@@ -84,9 +83,8 @@ func hwModelFromPlatform(p attest.Platform) string {
 // NewAttestationJWTClaims converts verified attestation data into JWT claims.
 func NewAttestationJWTClaims(appID string, v *attestation.VerifiedAttestation) *AttestationJWTClaims {
 	claims := &AttestationJWTClaims{
-		AppID:    appID,
-		HWModel:  hwModelFromPlatform(v.Platform),
-		Platform: v.Platform.PlatformTag(),
+		AppID:   appID,
+		HWModel: hwModelFromPlatform(v.Platform),
 	}
 
 	if v.TPMClaims != nil {
