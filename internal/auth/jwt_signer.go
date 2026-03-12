@@ -54,8 +54,8 @@ func (s *JWTSigner) SignAttestationJWT(appID string, verified *attestation.Verif
 	}
 
 	// Set rich attestation claims
-	if err := token.Set("appId", claims.AppID); err != nil {
-		return "", fmt.Errorf("failed to set appId: %w", err)
+	if err := token.Set("app_id", claims.AppID); err != nil {
+		return "", fmt.Errorf("failed to set app_id: %w", err)
 	}
 	if err := token.Set("secboot", claims.SecBoot); err != nil {
 		return "", fmt.Errorf("failed to set secboot: %w", err)

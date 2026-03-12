@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/hex"
+	"strconv"
 
 	"github.com/Layr-Labs/eigenx-kms/pkg/attestation"
 	"github.com/Layr-Labs/go-tpm-tools/sdk/attest"
@@ -10,7 +11,7 @@ import (
 // AttestationJWTClaims mirrors the CS token structure, populated from VerifiedAttestation.
 // Standard JWT fields (iss, sub, iat, exp, aud) are handled separately by the jwt library.
 type AttestationJWTClaims struct {
-	AppID    string  `json:"appId"`
+	AppID    string  `json:"app_id"`
 	SecBoot  bool    `json:"secboot"`
 	HWModel  string  `json:"hwmodel"`
 	Platform string  `json:"platform"`
@@ -40,10 +41,10 @@ type ContainerClaims struct {
 // GCEClaims describes the GCP Compute Engine instance.
 type GCEClaims struct {
 	ProjectID     string `json:"project_id"`
-	ProjectNumber uint64 `json:"project_number"`
+	ProjectNumber string `json:"project_number"`
 	Zone          string `json:"zone"`
 	InstanceName  string `json:"instance_name"`
-	InstanceID    uint64 `json:"instance_id"`
+	InstanceID    string `json:"instance_id"`
 }
 
 // TDXJWTClaims holds Intel TDX hardware measurements.
@@ -96,10 +97,10 @@ func NewAttestationJWTClaims(appID string, v *attestation.VerifiedAttestation) *
 		if v.TPMClaims.GCE != nil {
 			claims.SubMods.GCE = &GCEClaims{
 				ProjectID:     v.TPMClaims.GCE.ProjectID,
-				ProjectNumber: v.TPMClaims.GCE.ProjectNumber,
+				ProjectNumber: strconv.FormatUint(v.TPMClaims.GCE.ProjectNumber, 10),
 				Zone:          v.TPMClaims.GCE.Zone,
 				InstanceName:  v.TPMClaims.GCE.InstanceName,
-				InstanceID:    v.TPMClaims.GCE.InstanceID,
+				InstanceID:    strconv.FormatUint(v.TPMClaims.GCE.InstanceID, 10),
 			}
 		}
 	}

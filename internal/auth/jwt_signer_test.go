@@ -124,7 +124,7 @@ func TestSignAttestationJWT_Claims(t *testing.T) {
 
 	// Check custom claims
 	var gotAppID string
-	require.NoError(t, parsed.Get("appId", &gotAppID))
+	require.NoError(t, parsed.Get("app_id", &gotAppID))
 	require.Equal(t, appID, gotAppID)
 
 	// Check rich claims

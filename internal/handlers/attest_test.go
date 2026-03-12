@@ -415,7 +415,7 @@ func TestHandleAttest_V3_DebugOverride(t *testing.T) {
 	require.NoError(t, err)
 
 	var gotAppID string
-	require.NoError(t, parsed.Get("appId", &gotAppID))
+	require.NoError(t, parsed.Get("app_id", &gotAppID))
 	require.Equal(t, overrideAppID, gotAppID)
 }
 
