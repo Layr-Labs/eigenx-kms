@@ -63,9 +63,6 @@ func (s *JWTSigner) SignAttestationJWT(appID string, verified *attestation.Verif
 	if err := token.Set("hwmodel", claims.HWModel); err != nil {
 		return "", fmt.Errorf("failed to set hwmodel: %w", err)
 	}
-	if err := token.Set("platform", claims.Platform); err != nil {
-		return "", fmt.Errorf("failed to set platform: %w", err)
-	}
 	if err := token.Set("hardened", claims.Hardened); err != nil {
 		return "", fmt.Errorf("failed to set hardened: %w", err)
 	}

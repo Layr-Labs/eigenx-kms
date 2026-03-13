@@ -132,10 +132,6 @@ func TestSignAttestationJWT_Claims(t *testing.T) {
 	require.NoError(t, parsed.Get("hwmodel", &gotHWModel))
 	require.Equal(t, "GCP_SHIELDED_VM", gotHWModel)
 
-	var gotPlatform string
-	require.NoError(t, parsed.Get("platform", &gotPlatform))
-	require.Equal(t, "GCP_SHIELDED_VM", gotPlatform)
-
 	var gotHardened bool
 	require.NoError(t, parsed.Get("hardened", &gotHardened))
 	require.True(t, gotHardened)
