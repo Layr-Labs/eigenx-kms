@@ -11,11 +11,12 @@ import (
 // AttestationJWTClaims mirrors the CS token structure, populated from VerifiedAttestation.
 // Standard JWT fields (iss, sub, iat, exp, aud) are handled separately by the jwt library.
 type AttestationJWTClaims struct {
-	AppID    string  `json:"app_id"`
-	SecBoot  bool    `json:"secboot"`
-	HWModel  string  `json:"hwmodel"`
-	Hardened bool    `json:"hardened"`
-	SubMods  SubMods `json:"submods"`
+	AppID     string  `json:"app_id"`
+	SecBoot   bool    `json:"secboot"`
+	HWModel   string  `json:"hwmodel"`
+	Hardened  bool    `json:"hardened"`
+	SubMods   SubMods `json:"submods"`
+	ExtraData string  `json:"extra_data,omitempty"` // hex-encoded extra_data bytes as provided by the caller; present only when extra_data was provided
 
 	TDX    *TDXJWTClaims    `json:"tdx,omitempty"`
 	SevSnp *SevSnpJWTClaims `json:"sevsnp,omitempty"`

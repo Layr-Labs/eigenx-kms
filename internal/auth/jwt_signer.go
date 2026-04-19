@@ -30,9 +30,10 @@ func NewJWTSigner(privateKeyPEM string, expiration time.Duration) (*JWTSigner, e
 	}, nil
 }
 
-func (s *JWTSigner) SignAttestationJWT(appID string, verified *attestation.VerifiedAttestation, audience string) (string, error) {
+func (s *JWTSigner) SignAttestationJWT(appID string, verified *attestation.VerifiedAttestation, audience, extraDataHex string) (string, error) {
 	now := time.Now()
 	claims := NewAttestationJWTClaims(appID, verified)
+	claims.ExtraData = extraDataHex
 
 	token := jwt.New()
 	if err := token.Set(jwt.IssuerKey, jwtIssuer); err != nil {
@@ -77,6 +78,11 @@ func (s *JWTSigner) SignAttestationJWT(appID string, verified *attestation.Verif
 	if claims.SevSnp != nil {
 		if err := token.Set("sevsnp", claims.SevSnp); err != nil {
 			return "", fmt.Errorf("failed to set sevsnp: %w", err)
+		}
+	}
+	if claims.ExtraData != "" {
+		if err := token.Set("extra_data", claims.ExtraData); err != nil {
+			return "", fmt.Errorf("failed to set extra_data: %w", err)
 		}
 	}
 

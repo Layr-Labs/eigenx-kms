@@ -42,16 +42,16 @@ func (m *MockBoundAttestationEvidenceVerifier) EXPECT() *MockBoundAttestationEvi
 }
 
 // Verify mocks base method.
-func (m *MockBoundAttestationEvidenceVerifier) Verify(ctx context.Context, attestationBytes, challenge []byte) (*attestation.VerifiedAttestation, error) {
+func (m *MockBoundAttestationEvidenceVerifier) Verify(ctx context.Context, attestationBytes, challenge, extraData []byte) (*attestation.VerifiedAttestation, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Verify", ctx, attestationBytes, challenge)
+	ret := m.ctrl.Call(m, "Verify", ctx, attestationBytes, challenge, extraData)
 	ret0, _ := ret[0].(*attestation.VerifiedAttestation)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Verify indicates an expected call of Verify.
-func (mr *MockBoundAttestationEvidenceVerifierMockRecorder) Verify(ctx, attestationBytes, challenge any) *gomock.Call {
+func (mr *MockBoundAttestationEvidenceVerifierMockRecorder) Verify(ctx, attestationBytes, challenge, extraData any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Verify", reflect.TypeOf((*MockBoundAttestationEvidenceVerifier)(nil).Verify), ctx, attestationBytes, challenge)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Verify", reflect.TypeOf((*MockBoundAttestationEvidenceVerifier)(nil).Verify), ctx, attestationBytes, challenge, extraData)
 }

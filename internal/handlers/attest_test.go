@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -417,6 +418,96 @@ func TestHandleAttest_V3_DebugOverride(t *testing.T) {
 	var gotAppID string
 	require.NoError(t, parsed.Get("app_id", &gotAppID))
 	require.Equal(t, overrideAppID, gotAppID)
+}
+
+func TestHandleAttest_V3_WithExtraData(t *testing.T) {
+	logger := setupEnvLogger()
+	signer := createTestJWTSigner(t)
+
+	fakeKMS, err := fakes.NewFakeKMS()
+	require.NoError(t, err)
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockPolicy := policyMocks.NewMockPolicyCheckerInterface(ctrl)
+
+	clientRSAPrivatePEM, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	verifier := &stubBoundAttestationEvidenceVerifier{
+		result: gcpTPMClaims(testEnvAppID, testValidDigest),
+	}
+
+	mockPolicy.EXPECT().
+		CheckTPMPolicies(gomock.Any(), gomock.Any()).
+		Return(nil)
+
+	extraData := make([]byte, 32) // 32-byte SHA-256 hash
+	for i := range extraData {
+		extraData[i] = byte(i)
+	}
+
+	attestReq := types.AttestRequest{
+		Version:     3,
+		Attestation: base64.StdEncoding.EncodeToString([]byte("dummy")),
+		RSAKeyPEM:   string(clientRSAPublicPEM),
+		ExtraData:   hex.EncodeToString(extraData),
+	}
+	body, _ := json.Marshal(attestReq)
+	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
+
+	err = HandleAttest(c, logger, signer, verifier, mockPolicy, fakeKMS, false)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var signedResponse types.SignedResponse[types.AttestResponse]
+	err = json.Unmarshal(rec.Body.Bytes(), &signedResponse)
+	require.NoError(t, err)
+
+	rsaPrivateKey, err := crypto.RSAPrivateKeyFromPEM(clientRSAPrivatePEM)
+	require.NoError(t, err)
+	decryptedBytes, err := crypto.DecryptWithRSAOAEPAndAES256GCM(rsaPrivateKey, []byte(signedResponse.Data.EncryptedToken))
+	require.NoError(t, err)
+
+	var tokenPayload map[string]string
+	err = json.Unmarshal(decryptedBytes, &tokenPayload)
+	require.NoError(t, err)
+
+	parsed, err := jwt.Parse([]byte(tokenPayload["token"]), jwt.WithKey(jwa.RS256(), signer.PublicKey()))
+	require.NoError(t, err)
+
+	var gotExtraData string
+	require.NoError(t, parsed.Get("extra_data", &gotExtraData))
+	require.NotEmpty(t, gotExtraData)
+
+	// Verify extra_data in JWT is hex-encoded original bytes
+	require.Equal(t, hex.EncodeToString(extraData), gotExtraData)
+}
+
+func TestHandleAttest_V3_ExtraDataTooLarge(t *testing.T) {
+	logger := setupEnvLogger()
+	signer := createTestJWTSigner(t)
+
+	fakeKMS, err := fakes.NewFakeKMS()
+	require.NoError(t, err)
+
+	_, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	tooLarge := make([]byte, 65)
+	attestReq := types.AttestRequest{
+		Version:     3,
+		Attestation: base64.StdEncoding.EncodeToString([]byte("dummy")),
+		RSAKeyPEM:   string(clientRSAPublicPEM),
+		ExtraData:   hex.EncodeToString(tooLarge),
+	}
+	body, _ := json.Marshal(attestReq)
+	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
+
+	err = HandleAttest(c, logger, signer, nil, nil, fakeKMS, false)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	requireErrorResponse(t, rec, "extra_data exceeds 64-byte hardware limit")
 }
 
 func TestHandleAttest_V3_DebugOverrideRejectedInNonDebugMode(t *testing.T) {

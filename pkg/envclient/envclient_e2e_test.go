@@ -146,7 +146,7 @@ func (ts *TestKMSServer) SetupSuccessfulMocks(t *testing.T, appID string, privat
 
 	// Mock verifier returns GCP Shielded VM claims for this appID
 	ts.MockAttestationVerifier.EXPECT().
-		Verify(gomock.Any(), gomock.Any(), gomock.Any()).
+		Verify(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&attestation.VerifiedAttestation{
 			TPMClaims: &attest.TPMClaims{
 				GCE: &attest.GCEInfo{InstanceName: "app-" + appID, ProjectID: "test"},
