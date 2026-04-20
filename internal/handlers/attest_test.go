@@ -484,30 +484,50 @@ func TestHandleAttest_V3_WithExtraData(t *testing.T) {
 	require.Equal(t, hex.EncodeToString(extraData), gotExtraData)
 }
 
-func TestHandleAttest_V3_ExtraDataTooLarge(t *testing.T) {
-	logger := setupEnvLogger()
-	signer := createTestJWTSigner(t)
-
-	fakeKMS, err := fakes.NewFakeKMS()
-	require.NoError(t, err)
-
-	_, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
-	require.NoError(t, err)
-
-	tooLarge := make([]byte, 65)
-	attestReq := types.AttestRequest{
-		Version:     3,
-		Attestation: base64.StdEncoding.EncodeToString([]byte("dummy")),
-		RSAKeyPEM:   string(clientRSAPublicPEM),
-		ExtraData:   hex.EncodeToString(tooLarge),
+func TestHandleAttest_V3_ExtraDataValidationErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		extraData     string
+		wantErrSubstr string
+	}{
+		{
+			name:          "too large (65 bytes)",
+			extraData:     hex.EncodeToString(make([]byte, 65)),
+			wantErrSubstr: "extra_data exceeds 64-byte hardware limit",
+		},
+		{
+			name:          "malformed hex",
+			extraData:     "not-valid-hex!!",
+			wantErrSubstr: "Failed to decode extra_data",
+		},
 	}
-	body, _ := json.Marshal(attestReq)
-	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
 
-	err = HandleAttest(c, logger, signer, nil, nil, fakeKMS, false)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	requireErrorResponse(t, rec, "extra_data exceeds 64-byte hardware limit")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := setupEnvLogger()
+			signer := createTestJWTSigner(t)
+
+			fakeKMS, err := fakes.NewFakeKMS()
+			require.NoError(t, err)
+
+			_, clientRSAPublicPEM, err := crypto.GenerateRSAKeyPair()
+			require.NoError(t, err)
+
+			attestReq := types.AttestRequest{
+				Version:     3,
+				Attestation: base64.StdEncoding.EncodeToString([]byte("dummy")),
+				RSAKeyPEM:   string(clientRSAPublicPEM),
+				ExtraData:   tc.extraData,
+			}
+			body, _ := json.Marshal(attestReq)
+			c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
+
+			err = HandleAttest(c, logger, signer, nil, nil, fakeKMS, false)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			requireErrorResponse(t, rec, tc.wantErrSubstr)
+		})
+	}
 }
 
 func TestHandleAttest_V3_DebugOverrideRejectedInNonDebugMode(t *testing.T) {
