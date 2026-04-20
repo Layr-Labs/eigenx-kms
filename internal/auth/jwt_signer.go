@@ -30,10 +30,10 @@ func NewJWTSigner(privateKeyPEM string, expiration time.Duration) (*JWTSigner, e
 	}, nil
 }
 
-func (s *JWTSigner) SignAttestationJWT(appID string, verified *attestation.VerifiedAttestation, audience, extraDataHex string) (string, error) {
+func (s *JWTSigner) SignAttestationJWT(appID string, verified *attestation.VerifiedAttestation, audience, extraDataB64 string) (string, error) {
 	now := time.Now()
 	claims := NewAttestationJWTClaims(appID, verified)
-	claims.ExtraData = extraDataHex
+	claims.ExtraData = extraDataB64
 
 	token := jwt.New()
 	if err := token.Set(jwt.IssuerKey, jwtIssuer); err != nil {

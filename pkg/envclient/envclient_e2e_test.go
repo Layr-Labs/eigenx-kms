@@ -330,7 +330,7 @@ func TestEnvClient_E2E_Attest(t *testing.T) {
 			require.NoError(t, json.Unmarshal(payload, &claims))
 
 			if tc.extraData != nil {
-				require.Equal(t, hex.EncodeToString(tc.extraData), claims["extra_data"])
+				require.Equal(t, base64.StdEncoding.EncodeToString(tc.extraData), claims["extra_data"])
 			} else {
 				_, hasExtraData := claims["extra_data"]
 				require.False(t, hasExtraData, "extra_data claim should be absent when not provided")

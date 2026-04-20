@@ -186,7 +186,7 @@ var (
 
 	ExtraDataFlag = &cli.StringFlag{
 		Name:  "extra-data",
-		Usage: "Hex-encoded extra data to bind into the attestation (max 64 bytes; callers should pre-hash large payloads)",
+		Usage: "Base64-encoded extra data to bind into the attestation (max 1MB; go-tpm-tools hashes before hardware binding)",
 	}
 
 	UserAPIURLFlag = &cli.StringFlag{

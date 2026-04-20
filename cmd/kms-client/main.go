@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -107,12 +107,12 @@ func runAttest(c *cli.Context) error {
 
 	var extraData []byte
 	if cfg.ExtraData != "" {
-		extraData, err = hex.DecodeString(cfg.ExtraData)
+		extraData, err = base64.StdEncoding.DecodeString(cfg.ExtraData)
 		if err != nil {
-			return fmt.Errorf("failed to decode --extra-data (expected hex): %w", err)
+			return fmt.Errorf("failed to decode --extra-data (expected base64): %w", err)
 		}
-		if len(extraData) > 64 {
-			return fmt.Errorf("--extra-data exceeds 64-byte hardware limit (%d bytes); pre-hash large payloads before passing", len(extraData))
+		if len(extraData) > 1_048_576 {
+			return fmt.Errorf("--extra-data exceeds 1MB limit (%d bytes)", len(extraData))
 		}
 	}
 

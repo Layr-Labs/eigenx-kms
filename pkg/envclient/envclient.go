@@ -300,7 +300,7 @@ func (e *EnvClient) Attest(ctx context.Context, audience string, extraData ...[]
 		Audience:    audience,
 	}
 	if len(extraData) > 0 && len(extraData[0]) > 0 {
-		attestReq.ExtraData = hex.EncodeToString(extraData[0])
+		attestReq.ExtraData = base64.StdEncoding.EncodeToString(extraData[0])
 	}
 
 	e.Logger.Debug("Sending attest request to server", "url", e.serverURL)

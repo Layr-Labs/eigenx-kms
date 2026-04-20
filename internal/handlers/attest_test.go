@@ -5,7 +5,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -451,7 +450,7 @@ func TestHandleAttest_V3_WithExtraData(t *testing.T) {
 		Version:     3,
 		Attestation: base64.StdEncoding.EncodeToString([]byte("dummy")),
 		RSAKeyPEM:   string(clientRSAPublicPEM),
-		ExtraData:   hex.EncodeToString(extraData),
+		ExtraData:   base64.StdEncoding.EncodeToString(extraData),
 	}
 	body, _ := json.Marshal(attestReq)
 	c, rec := setupEchoContextWithBody(http.MethodPost, "/auth/attest", body)
@@ -480,8 +479,8 @@ func TestHandleAttest_V3_WithExtraData(t *testing.T) {
 	require.NoError(t, parsed.Get("extra_data", &gotExtraData))
 	require.NotEmpty(t, gotExtraData)
 
-	// Verify extra_data in JWT is hex-encoded original bytes
-	require.Equal(t, hex.EncodeToString(extraData), gotExtraData)
+	// Verify extra_data in JWT is base64-encoded original bytes
+	require.Equal(t, base64.StdEncoding.EncodeToString(extraData), gotExtraData)
 }
 
 func TestHandleAttest_V3_ExtraDataValidationErrors(t *testing.T) {
@@ -491,13 +490,13 @@ func TestHandleAttest_V3_ExtraDataValidationErrors(t *testing.T) {
 		wantErrSubstr string
 	}{
 		{
-			name:          "too large (65 bytes)",
-			extraData:     hex.EncodeToString(make([]byte, 65)),
-			wantErrSubstr: "extra_data exceeds 64-byte hardware limit",
+			name:          "too large (over 1MB)",
+			extraData:     base64.StdEncoding.EncodeToString(make([]byte, 1_048_576+1)),
+			wantErrSubstr: "extra_data exceeds 1MB limit",
 		},
 		{
-			name:          "malformed hex",
-			extraData:     "not-valid-hex!!",
+			name:          "malformed base64",
+			extraData:     "not-valid-base64!!@#$",
 			wantErrSubstr: "Failed to decode extra_data",
 		},
 	}

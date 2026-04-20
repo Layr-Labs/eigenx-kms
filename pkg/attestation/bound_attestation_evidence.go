@@ -48,7 +48,8 @@ func (v *VerifiedAttestation) VerifyPlatform(machineType string) error {
 
 // BoundAttestationEvidenceVerifier verifies raw bound attestation evidence against a
 // challenge and optional extraData, returning the extracted TPM and (where applicable) TEE claims.
-// extraData must be nil or at most 64 bytes (Intel TDX REPORTDATA / AMD SEV-SNP ReportData limit).
+// go-tpm-tools hashes extraData (SHA-256/SHA-512) before binding it into the hardware nonce,
+// so arbitrary-length data is accepted.
 type BoundAttestationEvidenceVerifier interface {
 	Verify(ctx context.Context, attestationBytes, challenge, extraData []byte) (*VerifiedAttestation, error)
 }

@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -62,13 +61,13 @@ func HandleAttest(
 		return returnError(c, logger, http.StatusInternalServerError, err.Error())
 	}
 
-	// Hex-encode the already-decoded extra_data for the JWT claim so verifiers can compare directly
-	var extraDataHex string
+	// Base64-encode the already-decoded extra_data for the JWT claim
+	var extraDataB64 string
 	if len(extraData) > 0 {
-		extraDataHex = hex.EncodeToString(extraData)
+		extraDataB64 = base64.StdEncoding.EncodeToString(extraData)
 	}
 
-	token, err := jwtSigner.SignAttestationJWT(appID, verified, req.Audience, extraDataHex)
+	token, err := jwtSigner.SignAttestationJWT(appID, verified, req.Audience, extraDataB64)
 	if err != nil {
 		return returnError(c, logger, http.StatusInternalServerError, fmt.Sprintf("Failed to sign attestation JWT: %v", err))
 	}
@@ -105,15 +104,16 @@ func handleAttestV3(
 		return "", nil, nil, newHTTPError(http.StatusBadRequest, "Failed to decode attestation: %v", err)
 	}
 
-	// Decode optional extra_data (max 64 bytes — Intel TDX / AMD SEV-SNP hardware limit)
+	// Decode optional extra_data (base64). go-tpm-tools hashes it (SHA-256/SHA-512)
+	// before binding into the hardware nonce, so arbitrary data up to 1MB is accepted.
 	var extraData []byte
 	if req.ExtraData != "" {
-		extraData, err = hex.DecodeString(req.ExtraData)
+		extraData, err = base64.StdEncoding.DecodeString(req.ExtraData)
 		if err != nil {
 			return "", nil, nil, newHTTPError(http.StatusBadRequest, "Failed to decode extra_data: %v", err)
 		}
-		if len(extraData) > 64 {
-			return "", nil, nil, newHTTPError(http.StatusBadRequest, "extra_data exceeds 64-byte hardware limit (%d bytes)", len(extraData))
+		if len(extraData) > 1_048_576 {
+			return "", nil, nil, newHTTPError(http.StatusBadRequest, "extra_data exceeds 1MB limit (%d bytes)", len(extraData))
 		}
 	}
 

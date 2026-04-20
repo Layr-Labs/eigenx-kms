@@ -76,7 +76,7 @@ type AttestRequest struct {
 	Attestation string `json:"attestation,omitempty"` // V3: base64-encoded raw attestation
 	RSAKeyPEM   string `json:"rsaKey,omitempty"`      // V3: RSA public key PEM
 	Audience    string `json:"audience,omitempty"`    // JWT audience claim
-	ExtraData   string `json:"extra_data,omitempty"`  // base64-encoded extra data (max 64 bytes; Intel TDX / AMD SEV-SNP hardware limit)
+	ExtraData   string `json:"extra_data,omitempty"`  // base64-encoded extra data (max 1MB; go-tpm-tools hashes before binding into hardware nonce)
 }
 
 type AttestResponse struct {
