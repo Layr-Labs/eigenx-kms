@@ -5,7 +5,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -16,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Layr-Labs/eigenx-kms/internal/auth"
 	"github.com/Layr-Labs/eigenx-kms/internal/handlers"
 	"github.com/Layr-Labs/eigenx-kms/internal/kms/fakes"
 	"github.com/Layr-Labs/eigenx-kms/pkg/attestation"
@@ -57,6 +60,7 @@ type TestKMSServer struct {
 	MockChainClient         *chainClientMocks.MockChainClient
 	MockAttestationVerifier *attestationMocks.MockBoundAttestationEvidenceVerifier
 	MockPolicyChecker       *policyMocks.MockPolicyCheckerInterface
+	JWTSigner               *auth.JWTSigner
 	Logger                  *slog.Logger
 	Ctrl                    *gomock.Controller
 }
@@ -71,6 +75,13 @@ func NewTestKMSServer(t *testing.T) *TestKMSServer {
 	fakeKMS, err := fakes.NewFakeKMS()
 	require.NoError(t, err)
 
+	// Create a JWT signer for /auth/attest
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	rsaKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(rsaKey)})
+	jwtSigner, err := auth.NewJWTSigner(string(rsaKeyPEM), time.Hour)
+	require.NoError(t, err)
+
 	mockChainClient := chainClientMocks.NewMockChainClient(ctrl)
 	mockAttestationVerifier := attestationMocks.NewMockBoundAttestationEvidenceVerifier(ctrl)
 	mockPolicyChecker := policyMocks.NewMockPolicyCheckerInterface(ctrl)
@@ -78,6 +89,9 @@ func NewTestKMSServer(t *testing.T) *TestKMSServer {
 	e := echo.New()
 	e.POST("/env/v3", func(c echo.Context) error {
 		return handlers.HandleEnvV3(c, logger, mockAttestationVerifier, mockPolicyChecker, mockChainClient, fakeKMS, false)
+	})
+	e.POST("/auth/attest", func(c echo.Context) error {
+		return handlers.HandleAttest(c, logger, jwtSigner, mockAttestationVerifier, mockPolicyChecker, fakeKMS, false)
 	})
 	e.GET("/health", func(c echo.Context) error {
 		return c.JSON(200, map[string]string{"status": "ok"})
@@ -102,6 +116,7 @@ func NewTestKMSServer(t *testing.T) *TestKMSServer {
 		MockChainClient:         mockChainClient,
 		MockAttestationVerifier: mockAttestationVerifier,
 		MockPolicyChecker:       mockPolicyChecker,
+		JWTSigner:               jwtSigner,
 		Logger:                  logger,
 		Ctrl:                    ctrl,
 	}
@@ -247,6 +262,86 @@ func TestEnvClient_E2E_ServerDown(t *testing.T) {
 	_, err = client.GetEnv(ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to send request after retries")
+}
+
+func TestEnvClient_E2E_Attest(t *testing.T) {
+	tests := []struct {
+		name      string
+		extraData []byte
+	}{
+		{
+			name:      "with extra_data",
+			extraData: []byte("action-hash-32-bytes-of-data-here"),
+		},
+		{
+			name:      "without extra_data",
+			extraData: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			testServer := NewTestKMSServer(t)
+
+			var expectedExtraData gomock.Matcher
+			if tc.extraData != nil {
+				expectedExtraData = gomock.Eq(tc.extraData)
+			} else {
+				expectedExtraData = gomock.Nil()
+			}
+
+			testServer.MockAttestationVerifier.EXPECT().
+				Verify(gomock.Any(), gomock.Any(), gomock.Any(), expectedExtraData).
+				Return(&attestation.VerifiedAttestation{
+					TPMClaims: &attest.TPMClaims{
+						GCE: &attest.GCEInfo{InstanceName: "app-" + testAppID, ProjectID: "test"},
+					},
+					Container: &attest.ContainerInfo{ImageDigest: testValidDigest},
+				}, nil)
+			testServer.MockPolicyChecker.EXPECT().
+				CheckTPMPolicies(gomock.Any(), gomock.Any()).
+				Return(nil)
+
+			_, signingKey, err := testServer.GetKMSKeys()
+			require.NoError(t, err)
+
+			mockProvider := &mockAttestationProvider{attestation: []byte("dummy-attestation-bytes")}
+			client := NewEnvClient(testServer.Logger, mockProvider, signingKey, testServer.Server.URL, testServer.UserAPIServer.URL)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			var tokenStr string
+			var attestErr error
+			if tc.extraData != nil {
+				tokenStr, attestErr = client.Attest(ctx, "test-audience", tc.extraData)
+			} else {
+				tokenStr, attestErr = client.Attest(ctx, "test-audience")
+			}
+			require.NoError(t, attestErr)
+			require.NotEmpty(t, tokenStr)
+
+			parts := strings.Split(tokenStr, ".")
+			require.Len(t, parts, 3)
+			payload, err := base64DecodeRaw(parts[1])
+			require.NoError(t, err)
+
+			var claims map[string]any
+			require.NoError(t, json.Unmarshal(payload, &claims))
+
+			if tc.extraData != nil {
+				require.Equal(t, hex.EncodeToString(tc.extraData), claims["extra_data"])
+			} else {
+				_, hasExtraData := claims["extra_data"]
+				require.False(t, hasExtraData, "extra_data claim should be absent when not provided")
+			}
+		})
+	}
+}
+
+// base64DecodeRaw decodes a base64url-encoded JWT segment.
+func base64DecodeRaw(s string) ([]byte, error) {
+	return base64.RawURLEncoding.DecodeString(s)
 }
 
 func TestEnvClient_E2E_UserAPIDown(t *testing.T) {

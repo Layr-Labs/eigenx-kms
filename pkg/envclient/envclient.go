@@ -273,7 +273,7 @@ func (e *EnvClient) sendRequest(ctx context.Context, envRequest types.EnvRequest
 	return &signedResponse, nil
 }
 
-func (e *EnvClient) Attest(ctx context.Context, audience string) (string, error) {
+func (e *EnvClient) Attest(ctx context.Context, audience string, extraData ...[]byte) (string, error) {
 	// Generate RSA key pair on the fly
 	e.Logger.Info("Generating RSA key pair for attestation")
 	rsaPrivateKeyPEM, rsaPublicKeyPEM, err := crypto.GenerateRSAKeyPair()
@@ -291,15 +291,20 @@ func (e *EnvClient) Attest(ctx context.Context, audience string) (string, error)
 		return "", fmt.Errorf("failed to get attestation: %w", err)
 	}
 
-	// Send request to server with base64-encoded attestation and RSA public key
+	// Build attest request, optionally including extra_data
 	attestationBase64 := base64.StdEncoding.EncodeToString(attestationBytes)
-	e.Logger.Debug("Sending attest request to server", "url", e.serverURL)
-	response, err := e.sendAttestRequest(ctx, types.AttestRequest{
+	attestReq := types.AttestRequest{
 		Version:     3,
 		Attestation: attestationBase64,
 		RSAKeyPEM:   string(rsaPublicKeyPEM),
 		Audience:    audience,
-	})
+	}
+	if len(extraData) > 0 && len(extraData[0]) > 0 {
+		attestReq.ExtraData = hex.EncodeToString(extraData[0])
+	}
+
+	e.Logger.Debug("Sending attest request to server", "url", e.serverURL)
+	response, err := e.sendAttestRequest(ctx, attestReq)
 	if err != nil {
 		return "", fmt.Errorf("failed to send attest request: %w", err)
 	}
