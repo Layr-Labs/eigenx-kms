@@ -22,6 +22,7 @@ type AttestConfig struct {
 	LogLevel      string
 	OutputFile    string
 	Audience      string
+	ExtraData     string // hex-encoded; empty means no extra data
 	Logger        *slog.Logger
 }
 
@@ -32,6 +33,7 @@ func NewAttestConfigFromCLI(c *cli.Context) (*AttestConfig, error) {
 		LogLevel:      c.String(LogLevelFlag.Name),
 		OutputFile:    c.String(OutputFileFlag.Name),
 		Audience:      c.String(AudienceFlag.Name),
+		ExtraData:     c.String(ExtraDataFlag.Name),
 	}
 
 	config.Logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: GetLogLevel(config.LogLevel)}))

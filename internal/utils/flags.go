@@ -184,6 +184,11 @@ var (
 		EnvVars: []string{"ATTEST_AUDIENCE"},
 	}
 
+	ExtraDataFlag = &cli.StringFlag{
+		Name:  "extra-data",
+		Usage: "Hex-encoded extra data to bind into the attestation (max 64 bytes; callers should pre-hash large payloads)",
+	}
+
 	UserAPIURLFlag = &cli.StringFlag{
 		Name:     "userapi-url",
 		Usage:    "User API URL to POST attestation JWT",

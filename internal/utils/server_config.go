@@ -29,21 +29,21 @@ func GetLogLevel(level string) slog.Level {
 }
 
 type ServerConfig struct {
-	Port                  string       `json:"port"`
-	LogLevel              string       `json:"log_level"`
-	Debug                 bool         `json:"debug"`
-	APIKey                string       `json:"api_key"`
-	EnvRateLimit          float64      `json:"env_rate_limit"`
-	ProjectID             string       `json:"project_id"`
-	AttestationProjectID  string       `json:"attestation_project_id"`
-	KMSLocation           string       `json:"kms_location"`
-	KMSKeyRing            string       `json:"kms_key_ring"`
-	KMSHmacKeyName        string       `json:"kms_hmac_key_name"`
-	KMSEncryptionKeyName  string       `json:"kms_encryption_key_name"`
-	KMSSigningKeyName     string       `json:"kms_signing_key_name"`
-	RPCURL                string       `json:"rpc_url"`
-	AppControllerAddress  string       `json:"app_controller_address"`
-	ImageAllowlistAddress  string        `json:"image_allowlist_address"`
+	Port                      string        `json:"port"`
+	LogLevel                  string        `json:"log_level"`
+	Debug                     bool          `json:"debug"`
+	APIKey                    string        `json:"api_key"`
+	EnvRateLimit              float64       `json:"env_rate_limit"`
+	ProjectID                 string        `json:"project_id"`
+	AttestationProjectID      string        `json:"attestation_project_id"`
+	KMSLocation               string        `json:"kms_location"`
+	KMSKeyRing                string        `json:"kms_key_ring"`
+	KMSHmacKeyName            string        `json:"kms_hmac_key_name"`
+	KMSEncryptionKeyName      string        `json:"kms_encryption_key_name"`
+	KMSSigningKeyName         string        `json:"kms_signing_key_name"`
+	RPCURL                    string        `json:"rpc_url"`
+	AppControllerAddress      string        `json:"app_controller_address"`
+	ImageAllowlistAddress     string        `json:"image_allowlist_address"`
 	AttestJWTSigningKeyPEM    string        `json:"attest_jwt_signing_key_pem"`
 	AttestJWTExpiration       time.Duration `json:"attest_jwt_expiration"`
 	AttestJWTSigningKeySource string        `json:"attest_jwt_signing_key_source"`
@@ -53,23 +53,23 @@ type ServerConfig struct {
 
 func NewServerConfigFromCLI(ctx context.Context, c *cli.Context) (*ServerConfig, error) {
 	config := &ServerConfig{
-		Port:                     c.String(PortFlag.Name),
-		LogLevel:                 c.String(LogLevelFlag.Name),
-		Debug:                    c.Bool(DebugFlag.Name),
-		APIKey:                   c.String(APIKeyFlag.Name),
-		EnvRateLimit:             c.Float64(EnvRateLimitFlag.Name),
-		ProjectID:                c.String(ProjectIDFlag.Name),
-		AttestationProjectID:     c.String(AttestationProjectIDFlag.Name),
-		KMSLocation:              c.String(KMSLocationFlag.Name),
-		KMSKeyRing:               c.String(KMSKeyRingFlag.Name),
-		KMSHmacKeyName:           c.String(KMSHmacKeyNameFlag.Name),
-		KMSEncryptionKeyName:     c.String(KMSEncryptionKeyNameFlag.Name),
-		KMSSigningKeyName:        c.String(KMSSigningKeyNameFlag.Name),
-		RPCURL:                   c.String(RPCURLFlag.Name),
-		AppControllerAddress:     c.String(AppControllerAddressFlag.Name),
-		ImageAllowlistAddress:    c.String(ImageAllowlistAddressFlag.Name),
-		AttestJWTSigningKeyPEM:   c.String(AttestJWTSigningKeyFlag.Name),
-		AttestJWTExpiration:      c.Duration(AttestJWTExpirationFlag.Name),
+		Port:                      c.String(PortFlag.Name),
+		LogLevel:                  c.String(LogLevelFlag.Name),
+		Debug:                     c.Bool(DebugFlag.Name),
+		APIKey:                    c.String(APIKeyFlag.Name),
+		EnvRateLimit:              c.Float64(EnvRateLimitFlag.Name),
+		ProjectID:                 c.String(ProjectIDFlag.Name),
+		AttestationProjectID:      c.String(AttestationProjectIDFlag.Name),
+		KMSLocation:               c.String(KMSLocationFlag.Name),
+		KMSKeyRing:                c.String(KMSKeyRingFlag.Name),
+		KMSHmacKeyName:            c.String(KMSHmacKeyNameFlag.Name),
+		KMSEncryptionKeyName:      c.String(KMSEncryptionKeyNameFlag.Name),
+		KMSSigningKeyName:         c.String(KMSSigningKeyNameFlag.Name),
+		RPCURL:                    c.String(RPCURLFlag.Name),
+		AppControllerAddress:      c.String(AppControllerAddressFlag.Name),
+		ImageAllowlistAddress:     c.String(ImageAllowlistAddressFlag.Name),
+		AttestJWTSigningKeyPEM:    c.String(AttestJWTSigningKeyFlag.Name),
+		AttestJWTExpiration:       c.Duration(AttestJWTExpirationFlag.Name),
 		AttestJWTSigningKeySource: c.String(AttestJWTSigningKeySourceFlag.Name),
 		AttestJWTSigningKeySecret: c.String(AttestJWTSigningKeySecretFlag.Name),
 	}
