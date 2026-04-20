@@ -45,7 +45,7 @@ type mockAttestationProvider struct {
 	err         error
 }
 
-func (m *mockAttestationProvider) GetAttestation(ctx context.Context, challenge []byte) ([]byte, error) {
+func (m *mockAttestationProvider) GetAttestation(ctx context.Context, challenge []byte, extraData ...[]byte) ([]byte, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

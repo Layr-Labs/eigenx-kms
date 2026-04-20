@@ -29,12 +29,13 @@ const (
 
 // AttestationProvider interface for generating raw attestation bytes
 type AttestationProvider interface {
-	GetAttestation(ctx context.Context, challenge []byte) ([]byte, error)
+	GetAttestation(ctx context.Context, challenge []byte, extraData ...[]byte) ([]byte, error)
 }
 
 // boundEvidenceRequest represents the request to the bound evidence endpoint
 type boundEvidenceRequest struct {
 	Challenge string `json:"challenge"`
+	ExtraData []byte `json:"extra_data,omitempty"`
 }
 
 // BoundEvidenceProvider implements AttestationProvider by calling /v1/bound_evidence on the attestation unix socket
@@ -46,10 +47,14 @@ func NewBoundEvidenceProvider(logger *slog.Logger) *BoundEvidenceProvider {
 	return &BoundEvidenceProvider{logger: logger}
 }
 
-func (p *BoundEvidenceProvider) GetAttestation(ctx context.Context, challenge []byte) ([]byte, error) {
-	reqBody, err := json.Marshal(boundEvidenceRequest{
+func (p *BoundEvidenceProvider) GetAttestation(ctx context.Context, challenge []byte, extraData ...[]byte) ([]byte, error) {
+	evidence := boundEvidenceRequest{
 		Challenge: base64.StdEncoding.EncodeToString(challenge),
-	})
+	}
+	if len(extraData) > 0 && len(extraData[0]) > 0 {
+		evidence.ExtraData = extraData[0]
+	}
+	reqBody, err := json.Marshal(evidence)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal bound evidence request: %w", err)
 	}
@@ -284,9 +289,9 @@ func (e *EnvClient) Attest(ctx context.Context, audience string, extraData ...[]
 	// Calculate RSA key hash for challenge
 	rsaKeyHash := crypto.CalculateSignableDigest(crypto.JWTRequestRSAKeyHeader, rsaPublicKeyPEM)
 
-	// Request raw attestation with RSA key hash as challenge
+	// Request raw attestation with RSA key hash as challenge, optionally binding extra_data
 	e.Logger.Info("Requesting attestation")
-	attestationBytes, err := e.attestationProvider.GetAttestation(ctx, rsaKeyHash)
+	attestationBytes, err := e.attestationProvider.GetAttestation(ctx, rsaKeyHash, extraData...)
 	if err != nil {
 		return "", fmt.Errorf("failed to get attestation: %w", err)
 	}
