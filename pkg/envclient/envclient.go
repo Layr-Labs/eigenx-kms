@@ -35,7 +35,7 @@ type AttestationProvider interface {
 // boundEvidenceRequest represents the request to the bound evidence endpoint
 type boundEvidenceRequest struct {
 	Challenge string `json:"challenge"`
-	ExtraData []byte `json:"extra_data,omitempty"`
+	ExtraData string `json:"extra_data,omitempty"`
 }
 
 // BoundEvidenceProvider implements AttestationProvider by calling /v1/bound_evidence on the attestation unix socket
@@ -52,7 +52,7 @@ func (p *BoundEvidenceProvider) GetAttestation(ctx context.Context, challenge []
 		Challenge: base64.StdEncoding.EncodeToString(challenge),
 	}
 	if len(extraData) > 0 && len(extraData[0]) > 0 {
-		evidence.ExtraData = extraData[0]
+		evidence.ExtraData = base64.StdEncoding.EncodeToString(extraData[0])
 	}
 	reqBody, err := json.Marshal(evidence)
 	if err != nil {
