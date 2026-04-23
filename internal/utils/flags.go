@@ -184,6 +184,11 @@ var (
 		EnvVars: []string{"ATTEST_AUDIENCE"},
 	}
 
+	ExtraDataFlag = &cli.StringFlag{
+		Name:  "extra-data",
+		Usage: "Base64-encoded extra data to bind into the attestation (max 1MB; go-tpm-tools hashes before hardware binding)",
+	}
+
 	UserAPIURLFlag = &cli.StringFlag{
 		Name:     "userapi-url",
 		Usage:    "User API URL to POST attestation JWT",

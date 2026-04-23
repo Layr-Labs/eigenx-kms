@@ -29,12 +29,13 @@ const (
 
 // AttestationProvider interface for generating raw attestation bytes
 type AttestationProvider interface {
-	GetAttestation(ctx context.Context, challenge []byte) ([]byte, error)
+	GetAttestation(ctx context.Context, challenge []byte, extraData ...[]byte) ([]byte, error)
 }
 
 // boundEvidenceRequest represents the request to the bound evidence endpoint
 type boundEvidenceRequest struct {
 	Challenge string `json:"challenge"`
+	ExtraData string `json:"extra_data,omitempty"`
 }
 
 // BoundEvidenceProvider implements AttestationProvider by calling /v1/bound_evidence on the attestation unix socket
@@ -46,10 +47,14 @@ func NewBoundEvidenceProvider(logger *slog.Logger) *BoundEvidenceProvider {
 	return &BoundEvidenceProvider{logger: logger}
 }
 
-func (p *BoundEvidenceProvider) GetAttestation(ctx context.Context, challenge []byte) ([]byte, error) {
-	reqBody, err := json.Marshal(boundEvidenceRequest{
+func (p *BoundEvidenceProvider) GetAttestation(ctx context.Context, challenge []byte, extraData ...[]byte) ([]byte, error) {
+	evidence := boundEvidenceRequest{
 		Challenge: base64.StdEncoding.EncodeToString(challenge),
-	})
+	}
+	if len(extraData) > 0 && len(extraData[0]) > 0 {
+		evidence.ExtraData = base64.StdEncoding.EncodeToString(extraData[0])
+	}
+	reqBody, err := json.Marshal(evidence)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal bound evidence request: %w", err)
 	}
@@ -273,7 +278,7 @@ func (e *EnvClient) sendRequest(ctx context.Context, envRequest types.EnvRequest
 	return &signedResponse, nil
 }
 
-func (e *EnvClient) Attest(ctx context.Context, audience string) (string, error) {
+func (e *EnvClient) Attest(ctx context.Context, audience string, extraData ...[]byte) (string, error) {
 	// Generate RSA key pair on the fly
 	e.Logger.Info("Generating RSA key pair for attestation")
 	rsaPrivateKeyPEM, rsaPublicKeyPEM, err := crypto.GenerateRSAKeyPair()
@@ -284,22 +289,27 @@ func (e *EnvClient) Attest(ctx context.Context, audience string) (string, error)
 	// Calculate RSA key hash for challenge
 	rsaKeyHash := crypto.CalculateSignableDigest(crypto.JWTRequestRSAKeyHeader, rsaPublicKeyPEM)
 
-	// Request raw attestation with RSA key hash as challenge
+	// Request raw attestation with RSA key hash as challenge, optionally binding extra_data
 	e.Logger.Info("Requesting attestation")
-	attestationBytes, err := e.attestationProvider.GetAttestation(ctx, rsaKeyHash)
+	attestationBytes, err := e.attestationProvider.GetAttestation(ctx, rsaKeyHash, extraData...)
 	if err != nil {
 		return "", fmt.Errorf("failed to get attestation: %w", err)
 	}
 
-	// Send request to server with base64-encoded attestation and RSA public key
+	// Build attest request, optionally including extra_data
 	attestationBase64 := base64.StdEncoding.EncodeToString(attestationBytes)
-	e.Logger.Debug("Sending attest request to server", "url", e.serverURL)
-	response, err := e.sendAttestRequest(ctx, types.AttestRequest{
+	attestReq := types.AttestRequest{
 		Version:     3,
 		Attestation: attestationBase64,
 		RSAKeyPEM:   string(rsaPublicKeyPEM),
 		Audience:    audience,
-	})
+	}
+	if len(extraData) > 0 && len(extraData[0]) > 0 {
+		attestReq.ExtraData = base64.StdEncoding.EncodeToString(extraData[0])
+	}
+
+	e.Logger.Debug("Sending attest request to server", "url", e.serverURL)
+	response, err := e.sendAttestRequest(ctx, attestReq)
 	if err != nil {
 		return "", fmt.Errorf("failed to send attest request: %w", err)
 	}

@@ -91,7 +91,7 @@ func TestSignAttestationJWT_Claims(t *testing.T) {
 	verified := testVerifiedAttestation(appID, imageDigest)
 
 	audience := "test-audience"
-	tokenStr, err := signer.SignAttestationJWT(appID, verified, audience)
+	tokenStr, err := signer.SignAttestationJWT(appID, verified, audience, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, tokenStr)
 
@@ -154,13 +154,44 @@ func TestSignAttestationJWT_Claims(t *testing.T) {
 	require.Equal(t, "test-project", gce["project_id"])
 }
 
+func TestSignAttestationJWT_ExtraData(t *testing.T) {
+	signer, err := NewJWTSigner(generateTestPKCS1PEM(t, 2048), time.Hour)
+	require.NoError(t, err)
+	verified := testVerifiedAttestation("app1", "sha256:abc123")
+
+	t.Run("extra_data claim present when provided", func(t *testing.T) {
+		extraDataHex := "deadbeefcafe"
+		tokenStr, err := signer.SignAttestationJWT("app1", verified, "", extraDataHex)
+		require.NoError(t, err)
+
+		parsed, err := jwt.Parse([]byte(tokenStr), jwt.WithKey(jwa.RS256(), signer.PublicKey()))
+		require.NoError(t, err)
+
+		var got string
+		require.NoError(t, parsed.Get("extra_data", &got))
+		require.Equal(t, extraDataHex, got)
+	})
+
+	t.Run("extra_data claim absent when not provided", func(t *testing.T) {
+		tokenStr, err := signer.SignAttestationJWT("app1", verified, "", "")
+		require.NoError(t, err)
+
+		parsed, err := jwt.Parse([]byte(tokenStr), jwt.WithKey(jwa.RS256(), signer.PublicKey()))
+		require.NoError(t, err)
+
+		var got string
+		err = parsed.Get("extra_data", &got)
+		require.Error(t, err) // claim should not exist
+	})
+}
+
 func TestSignAttestationJWT_VerifiableWithPublicKey(t *testing.T) {
 	pemStr := generateTestPKCS1PEM(t, 2048)
 	signer, err := NewJWTSigner(pemStr, time.Hour)
 	require.NoError(t, err)
 
 	verified := testVerifiedAttestation("app1", "sha256:abc123")
-	tokenStr, err := signer.SignAttestationJWT("app1", verified, "")
+	tokenStr, err := signer.SignAttestationJWT("app1", verified, "", "")
 	require.NoError(t, err)
 
 	// Verification should succeed with the correct public key

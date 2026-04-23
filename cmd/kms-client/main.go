@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,6 +37,7 @@ func main() {
 					utils.LogLevelFlag,
 					utils.OutputFileFlag,
 					utils.AudienceFlag,
+					utils.ExtraDataFlag,
 				},
 				Action: runAttest,
 			},
@@ -102,7 +104,19 @@ func runAttest(c *cli.Context) error {
 	attestationProvider := envclient.NewBoundEvidenceProvider(cfg.Logger)
 
 	envClient := envclient.NewEnvClient(cfg.Logger, attestationProvider, kmsSigningKeyBytes, cfg.ServerURL, "")
-	token, err := envClient.Attest(ctx, cfg.Audience)
+
+	var extraData []byte
+	if cfg.ExtraData != "" {
+		extraData, err = base64.StdEncoding.DecodeString(cfg.ExtraData)
+		if err != nil {
+			return fmt.Errorf("failed to decode --extra-data (expected base64): %w", err)
+		}
+		if len(extraData) > 1_048_576 {
+			return fmt.Errorf("--extra-data exceeds 1MB limit (%d bytes)", len(extraData))
+		}
+	}
+
+	token, err := envClient.Attest(ctx, cfg.Audience, extraData)
 	if err != nil {
 		return fmt.Errorf("failed to get attestation JWT: %w", err)
 	}

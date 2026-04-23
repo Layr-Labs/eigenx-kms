@@ -233,7 +233,7 @@ func HandleEnvV3(c echo.Context, logger *slog.Logger, attestationVerifier attest
 	// The attestation is bound to a challenge derived from the RSA key
 	challenge := crypto.CalculateSignableDigest(crypto.EnvRequestRSAKeyHeader, []byte(envRequest.RSAKeyPEM))
 
-	result, err := attestationVerifier.Verify(ctx, attestationBytes, challenge)
+	result, err := attestationVerifier.Verify(ctx, attestationBytes, challenge, nil)
 	if err != nil {
 		return returnError(c, logger, http.StatusUnauthorized, fmt.Sprintf("Attestation verification failed: %v", err))
 	}

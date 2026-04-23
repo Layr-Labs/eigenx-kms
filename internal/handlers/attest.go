@@ -61,7 +61,7 @@ func HandleAttest(
 		return returnError(c, logger, http.StatusInternalServerError, err.Error())
 	}
 
-	token, err := jwtSigner.SignAttestationJWT(appID, verified, req.Audience)
+	token, err := jwtSigner.SignAttestationJWT(appID, verified, req.Audience, req.ExtraData)
 	if err != nil {
 		return returnError(c, logger, http.StatusInternalServerError, fmt.Sprintf("Failed to sign attestation JWT: %v", err))
 	}
@@ -98,9 +98,22 @@ func handleAttestV3(
 		return "", nil, newHTTPError(http.StatusBadRequest, "Failed to decode attestation: %v", err)
 	}
 
+	// Decode optional extra_data (base64). go-tpm-tools hashes it (SHA-256/SHA-512)
+	// before binding into the hardware nonce, so arbitrary data up to 1MB is accepted.
+	var extraData []byte
+	if req.ExtraData != "" {
+		extraData, err = base64.StdEncoding.DecodeString(req.ExtraData)
+		if err != nil {
+			return "", nil, newHTTPError(http.StatusBadRequest, "Failed to decode extra_data: %v", err)
+		}
+		if len(extraData) > 1_048_576 {
+			return "", nil, newHTTPError(http.StatusBadRequest, "extra_data exceeds 1MB limit (%d bytes)", len(extraData))
+		}
+	}
+
 	challenge := crypto.CalculateSignableDigest(crypto.JWTRequestRSAKeyHeader, []byte(req.RSAKeyPEM))
 
-	result, err := attestationEvidenceVerifier.Verify(ctx, attestationBytes, challenge)
+	result, err := attestationEvidenceVerifier.Verify(ctx, attestationBytes, challenge, extraData)
 	if err != nil {
 		return "", nil, newHTTPError(http.StatusUnauthorized, "Attestation verification failed: %v", err)
 	}

@@ -33,7 +33,7 @@ type stubBoundAttestationEvidenceVerifier struct {
 	err    error
 }
 
-func (s *stubBoundAttestationEvidenceVerifier) Verify(_ context.Context, _, _ []byte) (*attestation.VerifiedAttestation, error) {
+func (s *stubBoundAttestationEvidenceVerifier) Verify(_ context.Context, _, _, _ []byte) (*attestation.VerifiedAttestation, error) {
 	return s.result, s.err
 }
 

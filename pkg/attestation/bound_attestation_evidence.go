@@ -47,9 +47,11 @@ func (v *VerifiedAttestation) VerifyPlatform(machineType string) error {
 }
 
 // BoundAttestationEvidenceVerifier verifies raw bound attestation evidence against a
-// challenge and returns the extracted TPM and (where applicable) TEE claims.
+// challenge and optional extraData, returning the extracted TPM and (where applicable) TEE claims.
+// go-tpm-tools hashes extraData (SHA-256/SHA-512) before binding it into the hardware nonce,
+// so arbitrary-length data is accepted.
 type BoundAttestationEvidenceVerifier interface {
-	Verify(ctx context.Context, attestationBytes, challenge []byte) (*VerifiedAttestation, error)
+	Verify(ctx context.Context, attestationBytes, challenge, extraData []byte) (*VerifiedAttestation, error)
 }
 
 type attestVerifier struct{}
@@ -59,12 +61,12 @@ func NewBoundAttestationEvidenceVerifier() BoundAttestationEvidenceVerifier {
 	return &attestVerifier{}
 }
 
-func (v *attestVerifier) Verify(_ context.Context, attestationBytes, challenge []byte) (*VerifiedAttestation, error) {
+func (v *attestVerifier) Verify(_ context.Context, attestationBytes, challenge, extraData []byte) (*VerifiedAttestation, error) {
 	a, err := attest.Parse(attestationBytes)
 	if err != nil {
 		return nil, fmt.Errorf("attestation parsing failed: %w", err)
 	}
-	verified, err := a.VerifyTPM(challenge, nil)
+	verified, err := a.VerifyTPM(challenge, extraData)
 	if err != nil {
 		return nil, fmt.Errorf("TPM verification failed: %w", err)
 	}
@@ -82,7 +84,7 @@ func (v *attestVerifier) Verify(_ context.Context, attestationBytes, challenge [
 	result.Container = container
 
 	if a.Platform() != attest.PlatformGCPShieldedVM {
-		teeVerified, err := a.VerifyBoundTEE(challenge, nil)
+		teeVerified, err := a.VerifyBoundTEE(challenge, extraData)
 		if err != nil {
 			return nil, fmt.Errorf("TEE verification failed: %w", err)
 		}
