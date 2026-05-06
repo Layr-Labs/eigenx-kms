@@ -36,12 +36,12 @@ func NewChainClient(logger *slog.Logger, appController types.AppController, imag
 
 	releaseManagerAddress, err := appController.ReleaseManager(&bind.CallOpts{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch release manager: %v", err)
+		return nil, fmt.Errorf("failed to fetch release manager: %w", sanitizeRPCError(err))
 	}
 
 	computeAVSRegistrarAddress, err := appController.ComputeAVSRegistrar(&bind.CallOpts{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch compute avs registrar: %v", err)
+		return nil, fmt.Errorf("failed to fetch compute avs registrar: %w", sanitizeRPCError(err))
 	}
 
 	ccLogger.Info("Chain client initialized successfully",
@@ -64,7 +64,7 @@ func (c *chainClientImpl) GetLatestRelease(ctx context.Context, appID string) ([
 	c.logger.Debug("Fetching app latest release block number", "app_address", appAddress)
 	latestReleaseBlockNumber, err := c.appController.GetAppLatestReleaseBlockNumber(&bind.CallOpts{Context: ctx}, appAddress)
 	if err != nil {
-		return [32]byte{}, types.Env{}, nil, fmt.Errorf("failed to get app latest release block number: %v", err)
+		return [32]byte{}, types.Env{}, nil, fmt.Errorf("failed to get app latest release block number: %w", sanitizeRPCError(err))
 	}
 	c.logger.Debug("App latest release block number fetched successfully", "block_number", latestReleaseBlockNumber)
 
@@ -73,7 +73,7 @@ func (c *chainClientImpl) GetLatestRelease(ctx context.Context, appID string) ([
 	c.logger.Debug("Filtering app upgraded events", "block_number", releaseBlockNumberUint64, "app_address", appAddress)
 	appUpgrades, err := c.appController.FilterAppUpgraded(&bind.FilterOpts{Context: ctx, Start: releaseBlockNumberUint64, End: &releaseBlockNumberUint64}, []common.Address{appAddress})
 	if err != nil {
-		return [32]byte{}, types.Env{}, nil, fmt.Errorf("failed to filter app upgraded: %v", err)
+		return [32]byte{}, types.Env{}, nil, fmt.Errorf("failed to filter app upgraded: %w", sanitizeRPCError(err))
 	}
 	c.logger.Debug("App upgraded events filtered successfully")
 
@@ -115,7 +115,7 @@ func (c *chainClientImpl) IsImageAllowed(ctx context.Context, cvm uint8, pcrs []
 
 	allowed, err := c.imageAllowlist.IsImageAllowed(&bind.CallOpts{Context: ctx}, cvm, pcrs)
 	if err != nil {
-		return false, fmt.Errorf("failed to check image allowlist: %w", err)
+		return false, fmt.Errorf("failed to check image allowlist: %w", sanitizeRPCError(err))
 	}
 
 	c.logger.Debug("Image allowlist check result", "allowed", allowed)
@@ -128,7 +128,7 @@ func (c *chainClientImpl) IsTCBValid(ctx context.Context, cvm uint8, tcb uint64)
 
 	valid, err := c.imageAllowlist.IsTCBValid(&bind.CallOpts{Context: ctx}, cvm, tcb)
 	if err != nil {
-		return false, fmt.Errorf("failed to check TCB validity: %w", err)
+		return false, fmt.Errorf("failed to check TCB validity: %w", sanitizeRPCError(err))
 	}
 
 	c.logger.Debug("TCB validity check result", "valid", valid)
