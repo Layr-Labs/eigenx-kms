@@ -6,6 +6,7 @@ toolchain go1.24.2
 
 require (
 	cloud.google.com/go/kms v1.23.0
+	cloud.google.com/go/secretmanager v1.16.0
 	github.com/Layr-Labs/eigenx-contracts v0.0.0-20260223155637-6137f1b215df
 	github.com/Layr-Labs/go-tpm-tools/sdk/attest v0.0.0-20260225172416-bbd228942d4a
 	github.com/cenkalti/backoff/v5 v5.0.0
@@ -19,6 +20,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/echo-swagger v1.4.1
 	github.com/swaggo/swag v1.16.6
+	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/urfave/cli/v2 v2.27.7
 	go.uber.org/mock v0.6.0
 	golang.org/x/crypto v0.43.0
@@ -35,7 +37,6 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cloud.google.com/go/iam v1.5.3 // indirect
 	cloud.google.com/go/longrunning v0.7.0 // indirect
-	cloud.google.com/go/secretmanager v1.16.0 // indirect
 	filippo.io/edwards25519 v1.0.0-rc.1 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/Layr-Labs/go-tpm-tools v0.4.8-0.20260225172416-bbd228942d4a // indirect
@@ -124,7 +125,6 @@ require (
 	github.com/swaggo/files/v2 v2.0.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
-	github.com/tyler-smith/go-bip39 v1.1.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fastjson v1.6.4 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect

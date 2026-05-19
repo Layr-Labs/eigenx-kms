@@ -152,6 +152,16 @@ var (
 		Usage: "Output file path to write environment variables in key=value format",
 	}
 
+	// StorageKeyOutputFileFlag is required (not optional) so a caller
+	// invoking `derive-storage-key` without an output destination fails
+	// fast — emitting the key to stdout would leak it into shell history,
+	// terminal scrollback, and any logging that captures process output.
+	StorageKeyOutputFileFlag = &cli.StringFlag{
+		Name:     "output-file",
+		Usage:    "Output file path to write the hex-encoded 32-byte LUKS key (mode 0600)",
+		Required: true,
+	}
+
 	AttestJWTSigningKeyFlag = &cli.StringFlag{
 		Name:    "attest-jwt-signing-key",
 		Usage:   "PEM-encoded RSA private key for signing attestation JWTs (enables /auth/attest endpoint)",
