@@ -12,7 +12,6 @@ import (
 	"os"
 	"time"
 
-	appcontrollerV1 "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/AppController"
 	"github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/ImageAllowlist"
 	"github.com/Layr-Labs/eigenx-kms/internal/auth"
 	"github.com/Layr-Labs/eigenx-kms/internal/handlers"
@@ -51,6 +50,7 @@ func main() {
 			utils.KMSSigningKeyNameFlag,
 			utils.RPCURLFlag,
 			utils.AppControllerAddressFlag,
+			utils.ReleaseAbiVersionFlag,
 			utils.ImageAllowlistAddressFlag,
 			utils.AttestJWTSigningKeyFlag,
 			utils.AttestJWTExpirationFlag,
@@ -85,7 +85,7 @@ func runServer(c *cli.Context) error {
 		return fmt.Errorf("failed to initialize eth client: %w", err)
 	}
 
-	appController, err := appcontrollerV1.NewAppController(common.HexToAddress(cfg.AppControllerAddress), ethClient)
+	appController, err := chainclient.NewAppController(cfg.ReleaseAbiVersion, common.HexToAddress(cfg.AppControllerAddress), ethClient)
 	if err != nil {
 		return fmt.Errorf("failed to initialize app controller: %w", err)
 	}
@@ -95,7 +95,7 @@ func runServer(c *cli.Context) error {
 		return fmt.Errorf("failed to initialize image allowlist: %w", err)
 	}
 
-	chainClient, err := chainclient.NewChainClient(cfg.Logger, chainclient.WrapAppController(appController), chainclient.WrapImageAllowlist(imageAllowlist))
+	chainClient, err := chainclient.NewChainClient(cfg.Logger, appController, chainclient.WrapImageAllowlist(imageAllowlist))
 	if err != nil {
 		return fmt.Errorf("failed to initialize chain client: %w", err)
 	}

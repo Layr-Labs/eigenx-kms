@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	appcontrollerV1 "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/AppController"
 	imageAllowlistV1 "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/ImageAllowlist"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -78,12 +77,10 @@ func (c *chainClientImpl) GetLatestRelease(ctx context.Context, appID string) ([
 	c.logger.Debug("App upgraded events filtered successfully")
 
 	// get the latest release deployed of all returned logs
-	var lastAppUpgrade *appcontrollerV1.AppControllerAppUpgraded
+	var lastAppUpgrade *types.AppRelease
 	for appUpgrades.Next() {
 		release := appUpgrades.Event()
-		if lastAppUpgrade == nil {
-			lastAppUpgrade = release
-		} else if release.Raw.Index > lastAppUpgrade.Raw.Index {
+		if lastAppUpgrade == nil || release.LogIndex > lastAppUpgrade.LogIndex {
 			lastAppUpgrade = release
 		}
 	}
@@ -91,22 +88,21 @@ func (c *chainClientImpl) GetLatestRelease(ctx context.Context, appID string) ([
 		return [32]byte{}, types.Env{}, nil, fmt.Errorf("no app upgrade found for app %s at block %d", appID, releaseBlockNumberUint64)
 	}
 
-	release := lastAppUpgrade.Release
-	c.logger.Debug("Found app upgraded event", "app_id", appID, "release_id", lastAppUpgrade.RmsReleaseId, "block", lastAppUpgrade.Raw.BlockNumber)
+	c.logger.Debug("Found app upgraded event", "app_id", appID, "release_id", lastAppUpgrade.RmsReleaseID, "block", lastAppUpgrade.BlockNumber)
 
-	if len(release.RmsRelease.Artifacts) != 1 {
-		return [32]byte{}, types.Env{}, nil, fmt.Errorf("expected 1 artifact, got %d", len(release.RmsRelease.Artifacts))
+	if len(lastAppUpgrade.ArtifactDigests) != 1 {
+		return [32]byte{}, types.Env{}, nil, fmt.Errorf("expected 1 artifact, got %d", len(lastAppUpgrade.ArtifactDigests))
 	}
-	c.logger.Debug("Release retrieved successfully", "app_id", appID, "artifact_digest", fmt.Sprintf("%x", release.RmsRelease.Artifacts[0].Digest))
+	c.logger.Debug("Release retrieved successfully", "app_id", appID, "artifact_digest", fmt.Sprintf("%x", lastAppUpgrade.ArtifactDigests[0]))
 
 	publicEnv := types.Env{}
-	err = json.Unmarshal(release.PublicEnv, &publicEnv)
+	err = json.Unmarshal(lastAppUpgrade.PublicEnv, &publicEnv)
 	if err != nil {
 		return [32]byte{}, types.Env{}, nil, fmt.Errorf("failed to unmarshal env: %v", err)
 	}
 	c.logger.Debug("Latest release data prepared", "app_id", appID, "public_env_vars_count", len(publicEnv))
 
-	return release.RmsRelease.Artifacts[0].Digest, publicEnv, release.EncryptedEnv, nil
+	return lastAppUpgrade.ArtifactDigests[0], publicEnv, lastAppUpgrade.EncryptedEnv, nil
 }
 
 // IsImageAllowed checks if the given PCRs are in the on-chain image allowlist.
