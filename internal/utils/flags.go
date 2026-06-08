@@ -105,6 +105,13 @@ var (
 		Required: true,
 	}
 
+	ReleaseAbiVersionFlag = &cli.StringFlag{
+		Name:    "release-abi-version",
+		Usage:   "AppController Release ABI version for this environment's on-chain contract: v1.4 (3-field Release) or v1.5 (4-field Release with containerPolicy)",
+		EnvVars: []string{"RELEASE_ABI_VERSION"},
+		Value:   "v1.5",
+	}
+
 	ImageAllowlistAddressFlag = &cli.StringFlag{
 		Name:     "image-allowlist-address",
 		Usage:    "ImageAllowlist contract address",

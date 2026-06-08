@@ -12,7 +12,6 @@ package mocks
 import (
 	reflect "reflect"
 
-	AppController "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/AppController"
 	ImageAllowlist "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/ImageAllowlist"
 	types "github.com/Layr-Labs/eigenx-kms/pkg/types"
 	bind "github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -174,10 +173,10 @@ func (m *MockAppUpgradedIterator) EXPECT() *MockAppUpgradedIteratorMockRecorder 
 }
 
 // Event mocks base method.
-func (m *MockAppUpgradedIterator) Event() *AppController.AppControllerAppUpgraded {
+func (m *MockAppUpgradedIterator) Event() *types.AppRelease {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Event")
-	ret0, _ := ret[0].(*AppController.AppControllerAppUpgraded)
+	ret0, _ := ret[0].(*types.AppRelease)
 	return ret0
 }
 

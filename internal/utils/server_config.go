@@ -43,6 +43,7 @@ type ServerConfig struct {
 	KMSSigningKeyName         string        `json:"kms_signing_key_name"`
 	RPCURL                    string        `json:"rpc_url"`
 	AppControllerAddress      string        `json:"app_controller_address"`
+	ReleaseAbiVersion         string        `json:"release_abi_version"`
 	ImageAllowlistAddress     string        `json:"image_allowlist_address"`
 	AttestJWTSigningKeyPEM    string        `json:"attest_jwt_signing_key_pem"`
 	AttestJWTExpiration       time.Duration `json:"attest_jwt_expiration"`
@@ -67,6 +68,7 @@ func NewServerConfigFromCLI(ctx context.Context, c *cli.Context) (*ServerConfig,
 		KMSSigningKeyName:         c.String(KMSSigningKeyNameFlag.Name),
 		RPCURL:                    c.String(RPCURLFlag.Name),
 		AppControllerAddress:      c.String(AppControllerAddressFlag.Name),
+		ReleaseAbiVersion:         c.String(ReleaseAbiVersionFlag.Name),
 		ImageAllowlistAddress:     c.String(ImageAllowlistAddressFlag.Name),
 		AttestJWTSigningKeyPEM:    c.String(AttestJWTSigningKeyFlag.Name),
 		AttestJWTExpiration:       c.Duration(AttestJWTExpirationFlag.Name),

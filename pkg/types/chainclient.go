@@ -2,15 +2,32 @@
 package types
 
 import (
-	appcontrollerV1 "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/AppController"
+	"math/big"
+
 	imageAllowlistV1 "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/ImageAllowlist"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 )
 
+// AppRelease is the version-agnostic projection of an AppUpgraded event that the
+// KMS consumes. Both the v1.4 (3-field Release) and v1.5 (4-field Release with
+// containerPolicy) AppController bindings are mapped into this shape by their
+// respective adapters, so the chainclient release-fetch logic stays independent
+// of which on-chain ABI an environment runs.
+type AppRelease struct {
+	RmsReleaseID    *big.Int
+	LogIndex        uint
+	BlockNumber     uint64
+	ArtifactDigests [][32]byte
+	PublicEnv       []byte
+	EncryptedEnv    []byte
+}
+
 type AppUpgradedIterator interface {
 	Next() bool
-	Event() *appcontrollerV1.AppControllerAppUpgraded
+	// Event returns the current AppUpgraded log projected into the
+	// version-agnostic AppRelease shape.
+	Event() *AppRelease
 }
 
 type AppController interface {

@@ -7,11 +7,9 @@ import (
 	"os"
 	"testing"
 
-	appcontrollerV1 "github.com/Layr-Labs/eigenx-contracts/pkg/bindings/v1/AppController"
 	"github.com/Layr-Labs/eigenx-kms/pkg/chainclient/mocks"
 	"github.com/Layr-Labs/eigenx-kms/pkg/types"
 	"github.com/ethereum/go-ethereum/common"
-	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -102,17 +100,12 @@ func TestGetLatestRelease(t *testing.T) {
 		publicEnv1JSON, _ := json.Marshal(publicEnv1)
 		encryptedEnv1 := []byte(`{"version":"1.0.0"}`)
 
-		release1 := &appcontrollerV1.AppControllerAppUpgraded{
-			Release: appcontrollerV1.IAppControllerRelease{
-				RmsRelease: appcontrollerV1.IReleaseManagerTypesRelease{
-					Artifacts: []appcontrollerV1.IReleaseManagerTypesArtifact{
-						{Digest: digest1},
-					},
-				},
-				PublicEnv:    publicEnv1JSON,
-				EncryptedEnv: encryptedEnv1,
-			},
-			Raw: ethtypes.Log{BlockNumber: uint64(latestBlockNumber), Index: 0},
+		release1 := &types.AppRelease{
+			ArtifactDigests: [][32]byte{digest1},
+			PublicEnv:       publicEnv1JSON,
+			EncryptedEnv:    encryptedEnv1,
+			BlockNumber:     uint64(latestBlockNumber),
+			LogIndex:        0,
 		}
 
 		// Mock iterator behavior: return release1, then release2, then stop
@@ -157,30 +150,20 @@ func TestGetLatestRelease(t *testing.T) {
 		encryptedEnv1 := []byte(`{"version":"1.0.0"}`)
 		encryptedEnv2 := []byte(`{"version":"2.0.0"}`)
 
-		release1 := &appcontrollerV1.AppControllerAppUpgraded{
-			Release: appcontrollerV1.IAppControllerRelease{
-				RmsRelease: appcontrollerV1.IReleaseManagerTypesRelease{
-					Artifacts: []appcontrollerV1.IReleaseManagerTypesArtifact{
-						{Digest: digest1},
-					},
-				},
-				PublicEnv:    publicEnv1JSON,
-				EncryptedEnv: encryptedEnv1,
-			},
-			Raw: ethtypes.Log{BlockNumber: 100, Index: 5},
+		release1 := &types.AppRelease{
+			ArtifactDigests: [][32]byte{digest1},
+			PublicEnv:       publicEnv1JSON,
+			EncryptedEnv:    encryptedEnv1,
+			BlockNumber:     100,
+			LogIndex:        5,
 		}
 
-		release2 := &appcontrollerV1.AppControllerAppUpgraded{
-			Release: appcontrollerV1.IAppControllerRelease{
-				RmsRelease: appcontrollerV1.IReleaseManagerTypesRelease{
-					Artifacts: []appcontrollerV1.IReleaseManagerTypesArtifact{
-						{Digest: digest2},
-					},
-				},
-				PublicEnv:    publicEnv2JSON,
-				EncryptedEnv: encryptedEnv2,
-			},
-			Raw: ethtypes.Log{BlockNumber: 100, Index: 10},
+		release2 := &types.AppRelease{
+			ArtifactDigests: [][32]byte{digest2},
+			PublicEnv:       publicEnv2JSON,
+			EncryptedEnv:    encryptedEnv2,
+			BlockNumber:     100,
+			LogIndex:        10,
 		}
 
 		// Mock iterator behavior: return release1, then release2, then stop
@@ -266,4 +249,47 @@ func TestGetLatestRelease(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "no app upgrade found")
 	})
+}
+
+func TestNewAppController(t *testing.T) {
+	t.Parallel()
+
+	// A nil backend is sufficient: NewAppController only constructs the bound
+	// contract (no RPC calls happen at construction time).
+	addr := common.HexToAddress("0x1111111111111111111111111111111111111111")
+
+	// isType reports whether ctrl's dynamic type matches T (comma-ok, no panic).
+	isV15 := func(ctrl types.AppController) bool { _, ok := ctrl.(*AppControllerAdapter); return ok }
+	isV14 := func(ctrl types.AppController) bool { _, ok := ctrl.(*AppControllerV14Adapter); return ok }
+
+	tests := []struct {
+		name        string
+		version     string
+		wantType    func(types.AppController) bool
+		errContains string // non-empty => expect an error containing this substring
+	}{
+		{name: "v1.5 selected", version: ReleaseAbiV15, wantType: isV15},
+		{name: "empty defaults to v1.5", version: "", wantType: isV15},
+		{name: "v1.4 selected", version: ReleaseAbiV14, wantType: isV14},
+		{name: "unknown version errors", version: "v9.9", errContains: "unknown release ABI version"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl, err := NewAppController(tt.version, addr, nil)
+
+			if tt.errContains != "" {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.errContains)
+				require.Nil(t, ctrl)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, ctrl)
+			require.True(t, tt.wantType(ctrl), "unexpected adapter type for version %q", tt.version)
+		})
+	}
 }
